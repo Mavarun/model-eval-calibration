@@ -143,6 +143,40 @@ def adaptive_expected_calibration_error(
     )
 
 
+def maximum_calibration_error(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    n_bins: int = 10,
+    strategy: BinningStrategy = "equal_width",
+    min_bin_count: int = 1,
+) -> float:
+    """Maximum Calibration Error: worst |accuracy - confidence| over bins.
+
+    MCE is the L-infinity analogue of ECE (Naeini et al., 2015). It is
+    dominated by sparsely populated bins, so ``min_bin_count`` lets callers
+    ignore bins with fewer than that many samples (default 1 = every
+    non-empty bin counts). Returns 0.0 if no bin qualifies.
+    """
+    y_true, y_prob = _validate_binary_probs(y_true, y_prob, n_bins)
+    if min_bin_count < 1:
+        raise ValueError("min_bin_count must be >= 1")
+    if strategy == "equal_width":
+        edges = _equal_width_edges(n_bins)
+    elif strategy in ("quantile", "adaptive"):
+        edges = _quantile_edges(y_prob, n_bins)
+    else:
+        raise ValueError(f"unknown strategy: {strategy!r}")
+    bin_ids = _bin_ids_from_edges(y_prob, edges)
+    worst = 0.0
+    for b in range(int(edges.size - 1)):
+        mask = bin_ids == b
+        if int(mask.sum()) < min_bin_count:
+            continue
+        gap = abs(float(y_true[mask].mean()) - float(y_prob[mask].mean()))
+        worst = max(worst, gap)
+    return float(worst)
+
+
 @dataclass(frozen=True)
 class ReliabilityCurve:
     """Per-bin reliability diagram data."""
