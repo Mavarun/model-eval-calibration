@@ -4,10 +4,86 @@ Research slices on **model evaluation beyond accuracy**:
 
 1. **Slice A**: Brier, equal-width ECE, reliability diagrams; Platt vs isotonic on `breast_cancer`.
 2. **Slice B**: **adaptive / quantile ECE** + **nested CV calibration** on a harder synthetic binary task.
-3. **Slice C (this PR)**: **calibration and conformal coverage under covariate shift** -- temperature / Platt / beta / isotonic maps, importance-weighted calibration, split vs weighted conformal sets, MCE and bootstrap CIs.
+3. **Slice C**: **calibration and conformal coverage under covariate shift** -- temperature / Platt / beta / isotonic maps, importance-weighted calibration, split vs weighted conformal sets, MCE and bootstrap CIs.
+4. **Slice D (this PR)**: **label shift and cost-aware decisions** -- EM and BBSE target-prior estimation, Bayes vs source-tuned thresholds at c_fn = 5 c_fp, pooled vs Mondrian conformal, and a **walk-forward** run under a drifting prior with a label-leakage barrier and block-bootstrap CIs.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice D hypothesis
+
+1. Under label shift (P(y) moves, P(x|y) fixed) a source-calibrated model is miscalibrated on the target by a known logit offset and its cost-optimal threshold moves; estimating the target prior from **unlabelled** target rows (EM, BBSE) and adjusting the posterior recovers most of the cost gap to the oracle.
+2. EM (Saerens et al., 2002) needs calibrated posteriors and BBSE (Lipton et al., 2018) does not, so a source calibration map should help EM.
+3. Pooled split conformal loses per-class coverage under label shift; Mondrian (class-conditional) conformal keeps it.
+4. Walk-forward with a drifting prior: label-free prior tracking beats a static model and is competitive with re-tuning the threshold on labels that arrive one batch late.
+
+## Slice D method
+
+- **Data** (`label_shift.py`): x|y=0 ~ N(0, I_6), x|y=1 ~ N(m, diag(s^2)) with unequal variances, so the log-likelihood ratio is quadratic and logistic regression is misspecified. `true_posterior(X, pi)` is the exact Bayes posterior for any prior (oracle).
+- **Cell** (`label_shift_eval.py`): source pi_s = 0.3: 2500 train / 2000 cal. Target pi_t in {0.05, 0.1, 0.3, 0.5}: 2000 **unlabelled** pool / 3000 labelled test; target labels only score. Base models: logistic, random forest (200 trees). Maps: raw / temperature / Platt / beta / isotonic fit on source cal.
+- **Priors** (`prior_estimation.py`): none (keep pi_s), EM on the pool, BBSE (hard base predictions + source confusion matrix), oracle pi_t. `adjust_posterior` moves the logit by the prior log-odds.
+- **Costs** (`costs.py`): c_fp = 1, c_fn = 5. Policies: Bayes threshold 1/6 on adjusted probabilities; a threshold tuned on source cal (no adjustment); the exact target posterior as the floor. **Regret** = cost per row - floor.
+- **Conformal**: LAC scores on raw base probabilities, alpha = 0.1; pooled split vs Mondrian (`mondrian_thresholds`).
+- **Walk-forward** (`drift_eval.py`): train and calibrate once on source; 24 target batches x 400 rows whose prior follows one cosine cycle 0.3 -> 0.06 -> 0.5 -> 0.3. At batch t policies use only pre-label information: static; EM on batch t-1; EM on a 3-batch past window; EM on batch t's own unlabelled features (label-free); BBSE on the window; a threshold re-tuned on batch t-1's labels (delayed labels); the true prior (ceiling). A test flips batch t's labels and checks no decision at t moves. Paired differences use a moving-block bootstrap (block 4 batches, seeds resampled).
+- **Grid**: 10 seeds per cell. `python scripts/run_label_shift_slice.py` (~80 s CPU; long CSVs under `artifacts/`).
+
+## Slice D results
+
+### Prior error and cost regret on target (mean ± std over 10 seeds; regret per row at c_fp = 1, c_fn = 5)
+
+Logistic (misspecified):
+
+| map | estimator | abs err pi_t=0.05 | abs err 0.1 | abs err 0.5 | regret 0.05 | regret 0.1 | regret 0.3 (no shift) | regret 0.5 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| raw | none | 0.252 | 0.202 | 0.198 | 0.248 ± 0.022 | 0.143 ± 0.019 | 0.031 ± 0.012 | 0.098 ± 0.031 |
+| raw | em | **0.016** | **0.014** | **0.017** | 0.016 ± 0.014 | 0.009 ± 0.009 | 0.037 ± 0.009 | 0.049 ± 0.013 |
+| raw | bbse | 0.014 | 0.019 | 0.027 | 0.015 ± 0.027 | 0.009 ± 0.014 | 0.036 ± 0.010 | 0.048 ± 0.012 |
+| raw | oracle prior | 0 | 0 | 0 | 0.006 ± 0.005 | 0.006 ± 0.007 | 0.031 ± 0.011 | 0.049 ± 0.014 |
+| raw | tuned on source | - | - | - | 0.209 ± 0.051 | 0.115 ± 0.039 | 0.043 ± 0.013 | 0.149 ± 0.067 |
+| platt | em | 0.019 | 0.026 | 0.030 | 0.016 ± 0.013 | 0.011 ± 0.011 | 0.035 ± 0.016 | 0.051 ± 0.016 |
+| isotonic | em | 0.016 | 0.024 | 0.029 | 0.014 ± 0.014 | 0.007 ± 0.009 | 0.042 ± 0.017 | 0.054 ± 0.011 |
+
+Random forest: raw-EM regret 0.012 / 0.024 / 0.036 / 0.031 at pi_t = 0.05 / 0.1 / 0.3 / 0.5 vs 0.268 / 0.157 / 0.034 / 0.095 ignoring the shift; BBSE within 0.007 of EM; source-tuned threshold 0.266 / 0.157 / 0.038 / 0.102. Floor cost per row: 0.159 / 0.274 / 0.417 / 0.382.
+
+### Conformal on target (alpha = 0.10; logistic, mean over 10 seeds; RF within 0.015)
+
+| pi_t | method | coverage | negatives | positives | set size |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 0.05 | split | 0.959 | 0.970 | **0.738** | 1.157 |
+| 0.05 | mondrian | 0.900 | 0.901 | **0.885** | 1.338 |
+| 0.3 | split | 0.902 | 0.970 | 0.739 | 1.192 |
+| 0.3 | mondrian | 0.902 | 0.903 | 0.900 | 1.321 |
+| 0.5 | split | **0.855** | 0.971 | 0.736 | 1.219 |
+| 0.5 | mondrian | 0.904 | 0.907 | 0.901 | 1.308 |
+
+### Walk-forward under prior drift (regret per row, mean ± std over 10 seeds)
+
+| base | map | static | EM t-1 | EM window 3 | EM current (label-free) | BBSE window | delayed-label threshold | oracle prior |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| logistic | raw | 0.093 ± 0.012 | 0.038 ± 0.008 | 0.049 ± 0.010 | **0.034 ± 0.005** | 0.049 ± 0.010 | 0.044 ± 0.007 | 0.028 ± 0.006 |
+| logistic | isotonic | 0.096 ± 0.010 | 0.041 ± 0.007 | 0.051 ± 0.011 | **0.035 ± 0.005** | 0.050 ± 0.013 | 0.042 ± 0.008 | 0.030 ± 0.005 |
+| random_forest | raw | 0.096 ± 0.011 | 0.037 ± 0.009 | 0.047 ± 0.012 | **0.033 ± 0.005** | 0.049 ± 0.012 | 0.047 ± 0.012 | 0.029 ± 0.006 |
+| random_forest | isotonic | 0.100 ± 0.012 | 0.044 ± 0.010 | 0.057 ± 0.015 | **0.039 ± 0.007** | 0.054 ± 0.016 | 0.051 ± 0.010 | 0.033 ± 0.006 |
+
+Paired cost differences (block bootstrap, 95% CI): EM-current minus delayed-label threshold is -0.007 to -0.014 per row with every CI below 0 (6/6 model x map cells); EM-window minus delayed-label is +0.000 to +0.009 (CI excludes 0 only for logistic/isotonic, against EM-window); EM t-1 beats the 3-batch window in all 6 cells (-0.010 to -0.013); EM-current vs static -0.059 to -0.064.
+
+### Reading the results
+
+- **H1 supported.** Ignoring a 0.3 -> 0.05 shift costs 0.25-0.27 per row above the floor (logistic, RF); EM or BBSE on 2000 unlabelled rows cuts that to 0.01-0.02. A threshold tuned on source labels does not help (0.21 / 0.27): it is tied to the source prior, exactly like the unadjusted Bayes cut. The source-tuned threshold is identical across maps because a monotone map does not change which rows a tuned cut separates.
+- **H2 not supported here (negative result).** Source calibration maps did not help EM: raw-logistic EM has the lowest prior error (0.014-0.017) and Platt / isotonic EM are 0.016-0.030, never lower than raw. Logistic regression is already calibrated in the large on source, and a map fitted on 2000 rows adds estimation noise that EM's fixed point amplifies. The unit test shows the mechanism still holds when miscalibration is real: an underconfident (T = 0.4) score drives EM from 0.10 to > 0.5.
+- **Correcting when nothing shifted costs a little.** At pi_t = 0.3 EM/BBSE regret is 0.036-0.037 vs 0.031 for doing nothing (estimation noise of about 0.015 in the prior).
+- **H3 supported.** Pooled split conformal covers positives only 0.72-0.74 at every prior (its single quantile is set by the majority class), so marginal coverage falls to 0.855 when positives become half the target. Mondrian keeps both classes at 0.885-0.907 for the price of larger sets (1.31-1.34 vs 1.16-1.24).
+- **H4 partly supported.** Label-free EM on the current batch beats re-tuning on one-batch-late labels in every cell. Tracking from a past window lags the drift (it follows the prior about two batches late) and is no better than the delayed-label threshold; the one-batch-back EM beats the 3-batch window everywhere, so in this drift lag costs more than variance.
+
+### Test design (slice D)
+
+- Generator: priors move while class-conditional means stay put; the logit moves by exactly the prior log-odds; the oracle posterior is calibrated; the LLR is non-affine.
+- Estimators: EM recovers pi_t within 0.015 from calibrated posteriors for pi_t in {0.05, 0.15, 0.5, 0.8}; same-ranking miscalibration biases EM (underconfident > 0.5, +0.8 logit offset > 0.3 for a true 0.1); BBSE recovers 0.1 within 0.02 from a deliberately miscalibrated hard rule; singular confusion matrices are refused.
+- Costs: hand-computed cost; Bayes threshold is optimal on the oracle posterior; the tuned threshold is the empirical minimiser; the shifted threshold on source scores equals the Bayes threshold on adjusted scores (0.167 -> 0.435 for 0.3 -> 0.1).
+- Conformal: Mondrian per-class coverage 0.904 / 0.906 over 150 calibration draws under 0.3 -> 0.1, pooled split 0.726 on positives.
+- Walk-forward: label-flip leakage probe; window lag (correlation > 0.98 with the prior two batches back); block bootstrap wider than i.i.d. on AR(1) differences.
+
+---
 
 ## Slice C hypothesis
 
@@ -141,6 +217,7 @@ pytest
 python scripts/run_calibration_slice.py          # slice A (breast_cancer)
 python scripts/run_nested_calibration_slice.py   # slice B (hard binary + nested)
 python scripts/run_shift_conformal_slice.py     # slice C (covariate shift + conformal)
+python scripts/run_label_shift_slice.py         # slice D (label shift, costs, walk-forward)
 ```
 
 ## Slice B results (make_classification_hard_binary, n=1200, outer=5, inner=3)
@@ -212,6 +289,11 @@ Raw logistic was already well calibrated. Extra calibration **hurt** ECE/Brier h
 
 ## Assumptions and limits / weaknesses
 
+- **Slice D is fully synthetic** with exact label shift (P(x|y) identical by construction) and one cost ratio (c_fn = 5 c_fp). Real data mixes label shift with covariate and concept drift; EM and BBSE are then biased and nothing here measures by how much.
+- The prior path is smooth and the walk-forward batches are large (400 rows); "EM on the current batch" assumes decisions can wait for a whole batch. Faster or abrupt drift, smaller batches or per-row decisions would change the ranking of policies.
+- Binary only; BBSE is the 2x2 case and EM's known failure under miscalibration is shown on synthetic score distortions, not measured on a real miscalibrated model.
+- The block length (4 batches) of the walk-forward bootstrap is a fixed choice, not tuned; seeds are only 10.
+
 - **Slice C is fully synthetic** (Gaussian marginals, one hand-written logit). Density-ratio estimation is easy here: the true log-ratio is linear, which is exactly what the logistic domain classifier models. Real shifts (non-Gaussian, high-dimensional, partial support overlap) will give worse ratios and larger weight variance.
 - Importance weighting assumes pure covariate shift and support overlap; it cannot fix label shift or concept drift, and the 99th-percentile weight clip trades bias for variance without a principled choice.
 - ESS of the weighted cal set falls to ~14% at shift 2; weighted results there carry seed std 2-4x larger than unweighted.
@@ -238,12 +320,18 @@ src/model_eval_calibration/
   shift.py          # covariate-shift generator, domain-classifier density ratio, ESS
   conformal.py      # split + weighted conformal sets and diagnostics
   shift_eval.py     # slice C harness: shift grid, win-rates, conformal coverage
+  label_shift.py    # slice D: prior-shift generator with exact Bayes posterior
+  prior_estimation.py # EM (Saerens 2002), BBSE (Lipton 2018), posterior adjustment
+  costs.py          # expected cost, Bayes / tuned / shifted thresholds
+  label_shift_eval.py # slice D harness: maps x estimators x cost policies, Mondrian
+  drift_eval.py     # walk-forward drift policies, leakage probe, block bootstrap
   nested.py         # naive same-fold vs nested CV evaluator + barrier helper
   evaluate.py       # OOF raw vs calibrated comparison harness (slice A)
   data.py           # breast_cancer + hard make_classification loaders
 scripts/run_calibration_slice.py
 scripts/run_nested_calibration_slice.py
 scripts/run_shift_conformal_slice.py
+scripts/run_label_shift_slice.py
 .github/workflows/tests.yml   # pytest on push / PR (py3.11, py3.12)
 tests/
 ```
@@ -252,6 +340,7 @@ tests/
 
 - Multiclass calibration and classwise reliability
 - Temperature scaling for neural nets (binary temperature is done in slice C; multiclass logits are not)
-- Label shift (EM prior correction) and real-data shift benchmarks (e.g. time-split public tabular sets)
-- Class-conditional (Mondrian) conformal and conditional-coverage diagnostics
+- Real-data shift benchmarks (e.g. time-split public tabular sets) for the slice C / D methods
+- Mixed label + covariate shift; multiclass BBSE / EM with a regularised confusion matrix
+- Conditional-coverage diagnostics beyond class (Mondrian is done in slice D)
 - Real OpenML adult/credit datasets (with license notes)
