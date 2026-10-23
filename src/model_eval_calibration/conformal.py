@@ -15,6 +15,13 @@ Guarantees and their assumptions
   With an *estimated* ratio the guarantee is only approximate, and heavy
   weights inflate variance (and can yield q_hat = inf -> the full set).
 
+* ``mondrian_thresholds``: class-conditional (Mondrian / label-conditional)
+  split conformal (Vovk et al., 2005): one quantile per true class, fitted on
+  that class's calibration scores. Then P(Y in C(X) | Y = c) >= 1 - alpha for
+  each c if rows are exchangeable *within* each class. Label shift changes
+  P(y) but not P(x | y), so the per-class guarantee survives label shift
+  while the marginal guarantee of plain split conformal does not.
+
 These are finite-sample marginal statements; the tests check them by
 averaging coverage over many independent calibration draws.
 """
@@ -158,3 +165,25 @@ def class_conditional_coverage(sets: np.ndarray, y: np.ndarray) -> dict[int, flo
         m = y == c
         out[c] = float(sets[m, c].mean()) if m.any() else float("nan")
     return out
+
+
+def mondrian_thresholds(cal_scores: np.ndarray, y_cal: np.ndarray, alpha: float = 0.1) -> tuple[float, float]:
+    """Per-class split-conformal quantiles (q_0, q_1) from each class's own calibration scores."""
+    _check_alpha(alpha)
+    s = np.asarray(cal_scores, dtype=float).ravel()
+    y = np.asarray(y_cal).astype(int).ravel()
+    if s.size != y.size:
+        raise ValueError("cal_scores and y_cal must have the same length")
+    out = []
+    for c in (0, 1):
+        m = y == c
+        if not m.any():
+            raise ValueError(f"no calibration rows of class {c}")
+        out.append(split_conformal_threshold(s[m], alpha))
+    return out[0], out[1]
+
+
+def mondrian_prediction_sets(p1: np.ndarray, q: tuple[float, float]) -> np.ndarray:
+    """Label j is in the set iff 1 - p_hat(j | x) <= q_j."""
+    P = _p_matrix(p1)
+    return (1.0 - P) <= np.asarray(q, dtype=float)[None, :]
