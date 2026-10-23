@@ -25,7 +25,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from model_eval_calibration.drift_eval import POLICIES, run_walk_forward, summarise_walk_forward  # noqa: E402
+from model_eval_calibration.drift_eval import (  # noqa: E402
+    POLICIES,
+    paired_policy_difference,
+    run_walk_forward,
+    summarise_walk_forward,
+)
 from model_eval_calibration.label_shift_eval import run_label_shift_grid  # noqa: E402
 
 import pandas as pd  # noqa: E402
@@ -94,6 +99,17 @@ def main() -> None:
           + ", ".join(f"{b}/{m} {v:.1f}" for (b, m), v in wins.items()))
     print("Seed win-rate, em_current vs delayed_label_threshold: "
           + ", ".join(f"{b}/{m} {v:.1f}" for (b, m), v in wins2.items()))
+    print("\n### Paired cost differences (moving-block bootstrap over batches, block 4, seeds resampled; 95% CI)\n")
+    print("| base | map | a - b | estimate | CI | P(a cheaper) |")
+    print("| --- | --- | --- | ---: | --- | ---: |")
+    for b in MODELS:
+        for m in MAPS:
+            sub = wf[(wf.base_model == b) & (wf.calibration == m)]
+            for pa, pb in (("em_current", "delayed_label_threshold"), ("em_window", "delayed_label_threshold"),
+                           ("em_prev", "em_window"), ("em_current", "static")):
+                r = paired_policy_difference(sub, pa, pb)
+                print(f"| {b} | {m} | {pa} - {pb} | {r['estimate']:+.4f} | [{r['lower']:+.4f}, {r['upper']:+.4f}] | "
+                      f"{r['prob_a_better']:.2f} |")
 
 
 if __name__ == "__main__":

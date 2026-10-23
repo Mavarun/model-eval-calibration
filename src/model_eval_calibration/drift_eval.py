@@ -118,3 +118,37 @@ def summarise_walk_forward(long: pd.DataFrame) -> pd.DataFrame:
     agg = per_seed.groupby(level=["base_model", "calibration", "policy"], sort=False).agg(["mean", "std"])
     agg.columns = [f"{m}_{s}" for m, s in agg.columns]
     return agg.reset_index()
+
+
+def _block_resample_mean(d: np.ndarray, block: int, rng: np.random.Generator) -> float:
+    """Mean of one moving-block bootstrap resample of a series (circular blocks)."""
+    n = d.size
+    starts = rng.integers(0, n, size=int(np.ceil(n / block)))
+    idx = (starts[:, None] + np.arange(block)[None, :]).ravel()[:n] % n
+    return float(d[idx].mean())
+
+
+def paired_policy_difference(long: pd.DataFrame, policy_a: str, policy_b: str, block: int = 4,
+                             n_boot: int = 2000, alpha: float = 0.05, random_state: int = 0) -> dict:
+    """Mean per-row cost difference a - b over batches and seeds, with a moving-block bootstrap CI.
+
+    Batches of one seed share a drift path, so per-batch differences are
+    autocorrelated; resampling whole blocks of ``block`` consecutive batches
+    within each seed (seeds resampled too) keeps that dependence. ``block=1``
+    is the i.i.d. bootstrap. ``prob_a_better`` is the bootstrap share with
+    a cheaper than b (descriptive, not a p-value).
+    """
+    if block < 1 or n_boot < 1 or not 0 < alpha < 1:
+        raise ValueError("block >= 1, n_boot >= 1 and 0 < alpha < 1 required")
+    piv = long.pivot_table(index=["seed", "batch"], columns="policy", values="cost")
+    d = (piv[policy_a] - piv[policy_b]).rename("d").reset_index()
+    series = [g.sort_values("batch")["d"].to_numpy() for _, g in d.groupby("seed")]
+    rng = np.random.default_rng(random_state)
+    boots = np.empty(n_boot)
+    for i in range(n_boot):
+        pick = rng.integers(0, len(series), size=len(series))
+        boots[i] = np.mean([_block_resample_mean(series[j], block, rng) for j in pick])
+    lo, hi = np.quantile(boots, [alpha / 2, 1 - alpha / 2])
+    return {"policy_a": policy_a, "policy_b": policy_b, "estimate": float(np.mean([s.mean() for s in series])),
+            "lower": float(lo), "upper": float(hi), "excludes_zero": bool(lo > 0 or hi < 0),
+            "prob_a_better": float(np.mean(boots < 0)), "block": block, "n_seeds": len(series)}

@@ -49,3 +49,41 @@ def test_prior_used_follows_the_drift_and_the_window_lags_it():
     assert corr("em_current", 0) > 0.95
     # a W=3 window of past batches is centred two batches back: it tracks the lagged prior best
     assert corr("em_window", 2) > 0.98 and corr("em_window", 2) > corr("em_window", 0)
+
+
+def _synthetic_long(diffs_by_seed):
+    rows = []
+    for s, d in enumerate(diffs_by_seed):
+        for t, v in enumerate(d):
+            rows += [{"seed": s, "batch": t, "policy": "a", "cost": 1.0 + v},
+                     {"seed": s, "batch": t, "policy": "b", "cost": 1.0}]
+    import pandas as pd
+    return pd.DataFrame(rows)
+
+
+def test_paired_difference_zero_when_policies_agree_and_detects_a_clear_gap():
+    from model_eval_calibration.drift_eval import paired_policy_difference
+
+    same = paired_policy_difference(_synthetic_long([np.zeros(24)] * 5), "a", "b", n_boot=200)
+    assert same["estimate"] == 0 and same["lower"] == same["upper"] == 0 and not same["excludes_zero"]
+    long = run_walk_forward(seed=3, n_batches=24, batch_size=400)
+    r = paired_policy_difference(long, "oracle_prior", "static", n_boot=300)
+    assert r["estimate"] < 0 and r["excludes_zero"] and r["prob_a_better"] > 0.95
+
+
+def test_block_bootstrap_is_wider_than_iid_on_autocorrelated_differences():
+    from model_eval_calibration.drift_eval import paired_policy_difference
+
+    rng = np.random.default_rng(0)
+    series = []
+    for _ in range(6):
+        e, x = rng.standard_normal(48), np.zeros(48)
+        for t in range(1, 48):
+            x[t] = 0.9 * x[t - 1] + e[t]  # AR(1), strongly autocorrelated
+        series.append(0.1 * x)
+    long = _synthetic_long(series)
+    iid = paired_policy_difference(long, "a", "b", block=1, n_boot=1000)
+    blk = paired_policy_difference(long, "a", "b", block=8, n_boot=1000)
+    assert (blk["upper"] - blk["lower"]) > 1.3 * (iid["upper"] - iid["lower"])
+    with pytest.raises(ValueError):
+        paired_policy_difference(long, "a", "b", block=0)
