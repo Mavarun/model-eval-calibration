@@ -175,3 +175,51 @@ def summarise_stream(long: pd.DataFrame) -> pd.DataFrame:
     agg = per_seed.groupby(level=["base_model", "path", "policy"], sort=False).agg(["mean", "std"])
     agg.columns = [f"{m}_{s}" for m, s in agg.columns]
     return agg.reset_index()
+
+
+TRACKER_GRIDS = {
+    "online_step": (0.002, 0.005, 0.01, 0.02, 0.05),
+    "window": (100, 200, 400, 800, 1600),
+    "cusum_threshold": (3.0, 4.0, 6.0, 10.0, 16.0),
+}
+DEV_SEEDS = tuple(range(1000, 1006))
+
+
+def _tracker_prior(name: str, value, p: np.ndarray, pi_s: float) -> np.ndarray:
+    if name == "online_step":
+        return online_em_path(p, pi_s, float(value))
+    if name == "window":
+        return window_em_path(p, pi_s, int(value), refit_every=10)
+    if name == "cusum_threshold":
+        return cusum_em_path(p, pi_s, threshold=float(value))[0]
+    raise ValueError(f"unknown tracker {name!r}")
+
+
+def select_trackers(base_model: str, dev_seeds=DEV_SEEDS, test_seeds=(), paths=("smooth", "regime"),
+                    grids: dict | None = None, n_rows: int = N_ROWS) -> tuple[dict, pd.DataFrame]:
+    """Pick each tracker's setting by mean per-row cost on *development* streams only.
+
+    Dev streams use their own seeds (disjoint from ``test_seeds``, checked)
+    and pool both drift shapes, so one setting per tracker and base model is
+    carried to the test streams -- the selection never sees a test row and
+    does not get to know which drift shape it will face.
+    """
+    grids = grids or TRACKER_GRIDS
+    if set(dev_seeds) & set(test_seeds):
+        raise ValueError("dev and test seeds overlap")
+    t_bayes = bayes_threshold(C_FP, C_FN)
+    rows = []
+    for s in dev_seeds:
+        model, cmap, _, _, pi_s = fit_source(s, base_model)
+        for kind in paths:
+            priors, _, X, y = make_target_stream(s, kind, n_rows)
+            p = cmap.transform(model.predict_proba(X)[:, 1])
+            for name, values in grids.items():
+                for v in values:
+                    d = decisions(adjust_posterior(p, pi_s, _tracker_prior(name, v, p, pi_s)), t_bayes)
+                    rows.append({"seed": s, "path": kind, "tracker": name, "value": v, "cost": _row_cost(y, d).mean()})
+    dev = pd.DataFrame(rows)
+    score = dev.groupby(["tracker", "value"])["cost"].mean().reset_index()
+    chosen = {name: score[score.tracker == name].sort_values(["cost", "value"]).iloc[0]["value"] for name in grids}
+    chosen = {k: (int(v) if k == "window" else float(v)) for k, v in chosen.items()}
+    return chosen, score
