@@ -105,3 +105,31 @@ def test_auto_block_is_long_on_autocorrelated_and_short_on_iid_differences():
     assert b_ar >= 4 and b_iid <= 2
     with pytest.raises(ValueError):
         paired_policy_difference(_synthetic_long(iid), "a", "b", block="four")
+
+
+def test_regime_path_is_piecewise_constant_with_real_jumps():
+    from model_eval_calibration.drift_eval import REGIME_LEVELS, regime_row_path
+
+    path, cp = regime_row_path(9600, np.random.default_rng(0))
+    assert path.size == 9600 and path[0] == 0.3 and set(np.unique(path)) <= set(REGIME_LEVELS)
+    jumps = np.flatnonzero(np.diff(path) != 0) + 1
+    assert np.array_equal(jumps, cp) and len(cp) >= 2  # change points are exactly where the level moves
+    assert np.diff(np.r_[0, cp]).min() >= 200
+    lens = np.concatenate([np.diff(np.r_[0, regime_row_path(9600, np.random.default_rng(s))[1]]) for s in range(40)])
+    assert 1200 < lens.mean() < 2000  # mean segment ~1600 rows
+    with pytest.raises(ValueError):
+        regime_row_path(100, np.random.default_rng(0), mean_duration=100, min_duration=200)
+
+
+def test_row_stream_follows_the_per_row_prior_with_fixed_class_conditionals():
+    from model_eval_calibration.drift_eval import sample_row_stream, smooth_row_path
+    from model_eval_calibration.label_shift import class_params
+
+    pri = np.r_[np.full(20000, 0.05), np.full(20000, 0.5)]
+    X, y = sample_row_stream(pri, np.random.default_rng(1))
+    assert abs(y[:20000].mean() - 0.05) < 0.01 and abs(y[20000:].mean() - 0.5) < 0.015
+    m, s = class_params(6)
+    assert np.allclose(X[y == 1].mean(0), m, atol=0.05) and np.allclose(X[y == 1].std(0), s, atol=0.05)
+    assert np.allclose(X[y == 0].mean(0), 0, atol=0.03)
+    sp = smooth_row_path(9600)
+    assert sp.size == 9600 and abs(sp[0] - 0.3) < 1e-9 and abs(sp.min() - 0.06) < 0.01
