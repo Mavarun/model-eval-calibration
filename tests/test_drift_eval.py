@@ -87,3 +87,21 @@ def test_block_bootstrap_is_wider_than_iid_on_autocorrelated_differences():
     assert (blk["upper"] - blk["lower"]) > 1.3 * (iid["upper"] - iid["lower"])
     with pytest.raises(ValueError):
         paired_policy_difference(long, "a", "b", block=0)
+
+
+def test_auto_block_is_long_on_autocorrelated_and_short_on_iid_differences():
+    from model_eval_calibration.drift_eval import paired_policy_difference
+
+    rng = np.random.default_rng(4)
+    ar, iid = [], []
+    for _ in range(6):
+        e, x = rng.standard_normal(96), np.zeros(96)
+        for t in range(1, 96):
+            x[t] = 0.85 * x[t - 1] + e[t]
+        ar.append(0.1 * x)
+        iid.append(0.1 * rng.standard_normal(96))
+    b_ar = paired_policy_difference(_synthetic_long(ar), "a", "b", block="auto", n_boot=200)["block"]
+    b_iid = paired_policy_difference(_synthetic_long(iid), "a", "b", block="auto", n_boot=200)["block"]
+    assert b_ar >= 4 and b_iid <= 2
+    with pytest.raises(ValueError):
+        paired_policy_difference(_synthetic_long(iid), "a", "b", block="four")
