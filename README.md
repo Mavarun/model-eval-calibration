@@ -5,10 +5,82 @@ Research slices on **model evaluation beyond accuracy**:
 1. **Slice A**: Brier, equal-width ECE, reliability diagrams; Platt vs isotonic on `breast_cancer`.
 2. **Slice B**: **adaptive / quantile ECE** + **nested CV calibration** on a harder synthetic binary task.
 3. **Slice C**: **calibration and conformal coverage under covariate shift** -- temperature / Platt / beta / isotonic maps, importance-weighted calibration, split vs weighted conformal sets, MCE and bootstrap CIs.
-4. **Slice D (this PR)**: **label shift and cost-aware decisions** -- EM and BBSE target-prior estimation, Bayes vs source-tuned thresholds at c_fn = 5 c_fp, pooled vs Mondrian conformal, and a **walk-forward** run under a drifting prior with a label-leakage barrier and block-bootstrap CIs.
+4. **Slice D**: **label shift and cost-aware decisions** -- EM and BBSE target-prior estimation, Bayes vs source-tuned thresholds at c_fn = 5 c_fp, pooled vs Mondrian conformal, and a **walk-forward** run under a drifting prior with a label-leakage barrier and block-bootstrap CIs.
+5. **Slice E (this PR)**: **per-row decisions under smooth and abrupt prior drift** -- online EM, sliding-window EM and CUSUM-restarted EM trackers, batch-latency and delayed-label baselines, dev-seed tuning, and Politis-White bootstrap block lengths.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice E hypothesis
+
+Slice D's best walk-forward policy ran EM on the 400-row batch being decided, so every row waited for its batch, and the prior only drifted smoothly. Slice E asks what happens when rows must be decided one at a time and the prior can jump.
+
+1. Batch EM degrades as batches shrink, so slice D's winner does not carry over to small batches or per-row decisions.
+2. Per-row label-free trackers that use only past rows (online EM, sliding-window EM) get close to the 400-row batch policy without making rows wait.
+3. Under abrupt jumps, EM restarted at CUSUM-detected change points beats fixed-memory trackers, mostly in the rows right after a change, and costs little on smooth drift.
+4. Label-free tracking beats re-tuning a threshold on labels that arrive 400 rows late, and the gap is largest after jumps.
+
+## Slice E method
+
+- **Streams** (`drift_eval.py`, `stream_eval.py`): the slice D world (pi_s = 0.3, c_fp = 1, c_fn = 5, model trained on 2500 and calibrated on 2000 source rows). 9600 target rows per stream (slice D's volume) on either the **smooth** cosine path evaluated per row or an **abrupt regime** path: piecewise-constant prior in {0.05, 0.1, 0.3, 0.5}, segment length 200 + geometric (mean 1600 rows), every switch a real jump, change points known.
+- **Trackers** (`online_prior.py`): every tracker's prior for row i is a function of rows < i (unlabelled features only; tested by rewriting the future). `online_em_path`: constant-step stochastic-approximation EM (Cappe & Moulines, 2009). `window_em_path`: Saerens EM on the last W rows (refit every 10). `cusum_em_path`: EM on rows since the last detected change plus a two-sided Page CUSUM on the label-shift mixture log-likelihood (prior moved by +/- 0.8 logit vs the current estimate); on an alarm EM restarts where the statistic last left zero.
+- **Policies**: static; `batch{400,100,25}_em_current` (slice D's policy, which waits for the batch); `batch400_em_prev` (EM on the previous batch, per-row usable); the three trackers; `delayed_label_threshold` (labels arrive 400 rows late, threshold re-tuned every 25 rows on the latest 400 labelled rows); oracle prior (ceiling). **Regret** = cost per row minus the exact-posterior cost on the same rows.
+- **Tuning out of sample**: each tracker's setting (online step in {0.002 .. 0.05}, window in {100 .. 1600}, CUSUM threshold in {3 .. 16}) is chosen per base model by mean cost on **6 development seeds (1000-1005)**, with both drift shapes pooled. Test seeds 0-9 are disjoint (checked). The choice was step 0.02, window 200 and threshold 4 for both models.
+- **Uncertainty**: paired per-row cost differences aggregated into 100-row chunks, moving-block bootstrap with seeds resampled. The block length is now picked by the **Politis-White rule** (`block_length.py`, with the Patton-Politis-White 2009 circular-block correction) instead of being fixed.
+- **Grid**: 10 test seeds x {smooth, regime} x {logistic, random forest}. `python scripts/run_drift_stream_slice.py` (~3 min CPU, including dev selection and a slice D re-check).
+
+## Slice E results
+
+### Regret per row on test streams (mean ± std over 10 seeds; c_fp = 1, c_fn = 5)
+
+| policy | smooth logistic | smooth RF | regime logistic | regime RF | regime post-change logistic | regime post-change RF |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| static | 0.098 ± 0.008 | 0.100 ± 0.011 | 0.113 ± 0.028 | 0.112 ± 0.022 | 0.141 ± 0.018 | 0.135 ± 0.022 |
+| batch400 EM current (waits) | **0.032 ± 0.005** | **0.035 ± 0.010** | 0.045 ± 0.016 | 0.042 ± 0.011 | 0.063 ± 0.022 | 0.061 ± 0.020 |
+| batch100 EM current (waits) | 0.046 ± 0.005 | 0.046 ± 0.007 | 0.045 ± 0.013 | 0.041 ± 0.007 | **0.052 ± 0.021** | **0.045 ± 0.016** |
+| batch25 EM current (waits) | 0.079 ± 0.007 | 0.079 ± 0.010 | 0.077 ± 0.013 | 0.071 ± 0.009 | 0.079 ± 0.022 | 0.073 ± 0.021 |
+| batch400 EM previous | 0.038 ± 0.009 | 0.039 ± 0.006 | 0.087 ± 0.040 | 0.079 ± 0.031 | 0.234 ± 0.099 | 0.214 ± 0.076 |
+| online EM (step 0.02) | 0.034 ± 0.006 | 0.036 ± 0.008 | 0.048 ± 0.020 | 0.042 ± 0.011 | 0.089 ± 0.035 | 0.082 ± 0.027 |
+| window EM (200 rows) | 0.038 ± 0.007 | 0.038 ± 0.008 | 0.050 ± 0.018 | 0.045 ± 0.010 | 0.086 ± 0.029 | 0.076 ± 0.024 |
+| CUSUM EM (h = 4) | 0.041 ± 0.005 | 0.040 ± 0.007 | **0.045 ± 0.020** | **0.041 ± 0.012** | 0.076 ± 0.032 | 0.071 ± 0.023 |
+| delayed-label threshold (400 late) | 0.048 ± 0.004 | 0.048 ± 0.011 | 0.115 ± 0.044 | 0.115 ± 0.042 | 0.293 ± 0.084 | 0.287 ± 0.083 |
+| oracle prior | 0.028 ± 0.006 | 0.028 ± 0.008 | 0.029 ± 0.013 | 0.025 ± 0.008 | 0.037 ± 0.018 | 0.027 ± 0.013 |
+
+Floor (exact-posterior) cost per row: 0.350 smooth, 0.343 regime. "Post-change" = regret per row over the 400 rows after each jump. Bold marks the best non-oracle policy in each column; batch policies make rows wait for their batch.
+
+### Paired cost differences a - b (block bootstrap over 100-row chunks, Politis-White block 2-6; 95% CI)
+
+| path | a - b | logistic | random forest |
+| --- | --- | --- | --- |
+| smooth | online EM - batch400 EM current | +0.002 [-0.002, +0.006] | +0.001 [-0.003, +0.006] |
+| smooth | CUSUM EM - online EM | **+0.006 [+0.003, +0.010]** | **+0.0045 [+0.001, +0.009]** |
+| smooth | CUSUM EM - delayed-label threshold | -0.008 [-0.014, -0.002] | -0.008 [-0.015, -0.002] |
+| smooth | online EM - batch25 EM current | -0.044 [-0.052, -0.038] | -0.043 [-0.050, -0.037] |
+| regime | CUSUM EM - batch400 EM current | +0.000 [-0.006, +0.007] | -0.001 [-0.007, +0.006] |
+| regime | CUSUM EM - online EM | -0.003 [-0.007, +0.002] | -0.001 [-0.005, +0.003] |
+| regime | CUSUM EM - window EM | -0.005 [-0.009, -0.001] | -0.004 [-0.008, -0.000] |
+| regime | CUSUM EM - delayed-label threshold | -0.070 [-0.099, -0.045] | -0.074 [-0.104, -0.049] |
+| regime | online EM - batch25 EM current | -0.029 [-0.038, -0.020] | -0.029 [-0.037, -0.021] |
+
+Slice D re-check: on slice D's 24 x 400 walk-forward the Politis-White rule picks blocks of 2-3 batches, and every slice D CI moves by at most 0.001 against the fixed block of 4. The slice D conclusions stand.
+
+### Reading the results
+
+- **H1 supported.** EM on the batch being decided goes from 0.032 regret (400 rows) to 0.046 (100) and 0.079 (25) on smooth drift. With 25 rows, prior-estimation noise costs most of what tracking saves (static 0.098). After jumps the ranking flips between 400 and 100 rows (0.063 vs 0.052 post-change), because a 400-row batch that straddles a jump averages two regimes.
+- **H2 supported.** Per-row online EM (step 0.02, only past rows) is within +0.000 to +0.003 of the 400-row batch policy on both paths, and every CI covers 0. It removes the wait without a measurable cost. It beats the 25-row batch by 0.029-0.044 per row (CIs exclude 0). EM on the *previous* 400-row batch is fine on smooth drift (0.038) but costly after jumps (0.21-0.23 post-change), because it reacts one full batch late.
+- **H3 mostly not supported.** CUSUM-restarted EM does cut post-change regret (0.076 / 0.071 vs online 0.089 / 0.082 and window 0.086 / 0.076). Overall on the regime path it beats the 200-row window (CIs just exclude 0) but **not** online EM: -0.003 / -0.001, CIs cover 0. On smooth drift it is a **regression**: +0.006 / +0.0045 (logistic / RF) vs online EM, CIs exclude 0, because false alarms restart EM on short segments when nothing jumped. On this evidence online EM is the safer default, and change detection only helps when jumps are known to dominate.
+- **H4 supported.** Every label-free tracker beats the 400-row-late label threshold: by 0.008-0.014 per row on smooth drift (point estimates; the CUSUM CI excludes 0) and by 0.07 per row overall on the regime path (post-change 0.29 vs 0.07-0.09), where late labels describe the previous regime.
+- **Tuning.** On the dev seeds online EM preferred a short memory (0.02, nominally 50 rows; cost 0.3678 vs 0.3973 at 0.002), and the CUSUM threshold had a flat optimum (3-6 within 0.002). The test ranking matches the dev ranking, and no setting was re-picked after looking at test seeds.
+
+### Test design (slice E)
+
+- Block length: white noise gets a median block < 2. On AR(1) the block grows with phi and lands within [0.5, 1.3] of the circular-block asymptotic (6 phi^2 / (1 - phi^2)^2)^(1/3) n^(1/3). Cap, constant series and short input are covered; `block="auto"` is long on AR(1) differences and short on i.i.d. ones.
+- Paths: the regime path is piecewise constant, its change points are exactly where the level moves, segments are >= 200 rows with a mean of about 1600, and the per-row sampler keeps P(x|y) fixed.
+- Trackers: the mixture log-likelihood is 0 at pi_s and maximised at the EM estimate; no tracker reads row i or later (future rewrite probe); a bigger online step reacts faster and is noisier; window EM equals batch EM on its window; CUSUM flags both jumps of a 0.3 -> 0.05 -> 0.5 stream within 300 rows and tracks the new level better than online EM right after the jump, and its false alarms on a constant stream fall with the threshold.
+- Harness: labels reach only the delayed-label policy and only after the delay (row-level check plus a whole-stream hash probe); post-change flags match the true change points; streams are reproducible per seed; tuning refuses overlapping dev/test seeds and returns the dev argmin.
+- Claims: `tests/test_slice_e_claims.py` re-checks each directional claim above on 3 seeds.
+
+---
 
 ## Slice D hypothesis
 
@@ -218,6 +290,7 @@ python scripts/run_calibration_slice.py          # slice A (breast_cancer)
 python scripts/run_nested_calibration_slice.py   # slice B (hard binary + nested)
 python scripts/run_shift_conformal_slice.py     # slice C (covariate shift + conformal)
 python scripts/run_label_shift_slice.py         # slice D (label shift, costs, walk-forward)
+python scripts/run_drift_stream_slice.py        # slice E (per-row decisions, abrupt drift, online priors)
 ```
 
 ## Slice B results (make_classification_hard_binary, n=1200, outer=5, inner=3)
@@ -289,10 +362,16 @@ Raw logistic was already well calibrated. Extra calibration **hurt** ECE/Brier h
 
 ## Assumptions and limits / weaknesses
 
+- **Slice E is fully synthetic** and keeps exact label shift: P(x|y) never moves, so every tracker is estimating the right quantity. Real streams mix in covariate and concept drift; the CUSUM statistic then alarms on drift that a prior correction cannot fix.
+- The regime path draws its jumps from four fixed levels with segments of about 1600 rows. Shorter regimes, small jumps (for example 0.3 -> 0.25) or gradual-then-abrupt mixtures are not tested, and the CUSUM drift size (0.8 logit) is fixed rather than tuned.
+- Tracker settings are tuned on only 6 development seeds, and one setting per model is shared across both drift shapes. A per-shape choice would need a drift-type detector, which is not built.
+- The delayed-label baseline uses one delay (400 rows) and one window (400). Shorter label delays would narrow its gap.
+- The block bootstrap runs on 100-row chunk means. The Politis-White rule picked blocks of 2-6 chunks; within-chunk dependence is averaged out, not modelled.
+
 - **Slice D is fully synthetic** with exact label shift (P(x|y) identical by construction) and one cost ratio (c_fn = 5 c_fp). Real data mixes label shift with covariate and concept drift; EM and BBSE are then biased and nothing here measures by how much.
-- The prior path is smooth and the walk-forward batches are large (400 rows); "EM on the current batch" assumes decisions can wait for a whole batch. Faster or abrupt drift, smaller batches or per-row decisions would change the ranking of policies.
+- The slice D prior path is smooth and its batches are large (400 rows); "EM on the current batch" assumes decisions can wait for a whole batch. Slice E measures abrupt drift, smaller batches and per-row decisions.
 - Binary only; BBSE is the 2x2 case and EM's known failure under miscalibration is shown on synthetic score distortions, not measured on a real miscalibrated model.
-- The block length (4 batches) of the walk-forward bootstrap is a fixed choice, not tuned; seeds are only 10.
+- The slice D block length (4 batches) was a fixed choice; slice E re-checked it with the Politis-White rule (2-3 batches, CIs move <= 0.001). Seeds are only 10.
 
 - **Slice C is fully synthetic** (Gaussian marginals, one hand-written logit). Density-ratio estimation is easy here: the true log-ratio is linear, which is exactly what the logistic domain classifier models. Real shifts (non-Gaussian, high-dimensional, partial support overlap) will give worse ratios and larger weight variance.
 - Importance weighting assumes pure covariate shift and support overlap; it cannot fix label shift or concept drift, and the 99th-percentile weight clip trades bias for variance without a principled choice.
@@ -324,7 +403,10 @@ src/model_eval_calibration/
   prior_estimation.py # EM (Saerens 2002), BBSE (Lipton 2018), posterior adjustment
   costs.py          # expected cost, Bayes / tuned / shifted thresholds
   label_shift_eval.py # slice D harness: maps x estimators x cost policies, Mondrian
-  drift_eval.py     # walk-forward drift policies, leakage probe, block bootstrap
+  drift_eval.py     # walk-forward drift policies, per-row / regime prior paths, leakage probe, block bootstrap
+  block_length.py   # Politis-White (PPW 2009) circular-block bootstrap block length
+  online_prior.py   # slice E: online EM, window EM, CUSUM-restarted EM (past rows only)
+  stream_eval.py    # slice E harness: per-row policies, dev-seed tuning, post-change regret
   nested.py         # naive same-fold vs nested CV evaluator + barrier helper
   evaluate.py       # OOF raw vs calibrated comparison harness (slice A)
   data.py           # breast_cancer + hard make_classification loaders
@@ -332,6 +414,7 @@ scripts/run_calibration_slice.py
 scripts/run_nested_calibration_slice.py
 scripts/run_shift_conformal_slice.py
 scripts/run_label_shift_slice.py
+scripts/run_drift_stream_slice.py
 .github/workflows/tests.yml   # pytest on push / PR (py3.11, py3.12)
 tests/
 ```
@@ -343,4 +426,5 @@ tests/
 - Real-data shift benchmarks (e.g. time-split public tabular sets) for the slice C / D methods
 - Mixed label + covariate shift; multiclass BBSE / EM with a regularised confusion matrix
 - Conditional-coverage diagnostics beyond class (Mondrian is done in slice D)
+- Drift streams that mix label and covariate shift, so that a CUSUM alarm can be told apart from a prior jump (slice E assumes pure label shift)
 - Real OpenML adult/credit datasets (with license notes)
