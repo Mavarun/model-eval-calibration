@@ -67,3 +67,17 @@ def test_streams_are_reproducible_per_seed():
     b = make_target_stream(3, "regime", 1000)
     c = make_target_stream(4, "regime", 1000)
     assert all(np.array_equal(u, v) for u, v in zip(a, b)) and not np.array_equal(a[3], c[3])
+
+
+def test_selection_uses_dev_seeds_only_and_returns_the_dev_argmin():
+    from model_eval_calibration.stream_eval import select_trackers
+
+    grids = {"online_step": (0.002, 0.02), "window": (200, 800), "cusum_threshold": (6.0,)}
+    chosen, score = select_trackers("logistic", dev_seeds=(1000, 1001), test_seeds=range(10), grids=grids, n_rows=2000)
+    assert set(chosen) == set(grids) and isinstance(chosen["window"], int)
+    for name, v in chosen.items():
+        sub = score[score.tracker == name]
+        assert sub.loc[sub.value == v, "cost"].iloc[0] == sub["cost"].min()
+    assert len(score) == 5
+    with pytest.raises(ValueError):
+        select_trackers("logistic", dev_seeds=(3, 1000), test_seeds=range(10), grids=grids, n_rows=500)
