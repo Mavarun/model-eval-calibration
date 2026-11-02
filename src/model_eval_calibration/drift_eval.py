@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 
+from model_eval_calibration.block_length import pooled_block_length
 from model_eval_calibration.calibration_maps import make_calibration_maps
 from model_eval_calibration.costs import bayes_threshold, decisions, expected_cost, tune_threshold
 from model_eval_calibration.label_shift import sample_label_shift, true_posterior
@@ -128,21 +129,27 @@ def _block_resample_mean(d: np.ndarray, block: int, rng: np.random.Generator) ->
     return float(d[idx].mean())
 
 
-def paired_policy_difference(long: pd.DataFrame, policy_a: str, policy_b: str, block: int = 4,
+def paired_policy_difference(long: pd.DataFrame, policy_a: str, policy_b: str, block: int | str = 4,
                              n_boot: int = 2000, alpha: float = 0.05, random_state: int = 0) -> dict:
     """Mean per-row cost difference a - b over batches and seeds, with a moving-block bootstrap CI.
 
     Batches of one seed share a drift path, so per-batch differences are
     autocorrelated; resampling whole blocks of ``block`` consecutive batches
     within each seed (seeds resampled too) keeps that dependence. ``block=1``
-    is the i.i.d. bootstrap. ``prob_a_better`` is the bootstrap share with
-    a cheaper than b (descriptive, not a p-value).
+    is the i.i.d. bootstrap; ``block="auto"`` picks it per comparison with
+    the Politis-White rule (``block_length.pooled_block_length``, median
+    over seeds). ``prob_a_better`` is the bootstrap share with a cheaper
+    than b (descriptive, not a p-value).
     """
-    if block < 1 or n_boot < 1 or not 0 < alpha < 1:
-        raise ValueError("block >= 1, n_boot >= 1 and 0 < alpha < 1 required")
+    if n_boot < 1 or not 0 < alpha < 1:
+        raise ValueError("n_boot >= 1 and 0 < alpha < 1 required")
     piv = long.pivot_table(index=["seed", "batch"], columns="policy", values="cost")
     d = (piv[policy_a] - piv[policy_b]).rename("d").reset_index()
     series = [g.sort_values("batch")["d"].to_numpy() for _, g in d.groupby("seed")]
+    if block == "auto":
+        block = pooled_block_length(series)
+    if not isinstance(block, (int, np.integer)) or block < 1:
+        raise ValueError("block must be an integer >= 1 or 'auto'")
     rng = np.random.default_rng(random_state)
     boots = np.empty(n_boot)
     for i in range(n_boot):
