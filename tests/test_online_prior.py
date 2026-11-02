@@ -60,3 +60,35 @@ def test_window_em_matches_batch_em_on_its_window():
         online_em_path(p, PI_S, 0.0)
     with pytest.raises(ValueError):
         window_em_path(p, PI_S, 0)
+
+
+def test_cusum_detects_jumps_quickly_and_restarts_em_on_the_new_segment():
+    from model_eval_calibration.online_prior import cusum_em_path
+
+    p, _ = _stream(np.r_[np.full(3000, 0.3), np.full(3000, 0.05), np.full(3000, 0.5)], 2)
+    used, alarms = cusum_em_path(p, PI_S, threshold=6.0)
+    for cp in (3000, 6000):
+        hit = alarms[(alarms >= cp) & (alarms < cp + 300)]
+        assert hit.size >= 1, cp  # each jump is flagged within 300 rows
+    assert abs(used[3400:6000].mean() - 0.05) < 0.02 and abs(used[6400:].mean() - 0.5) < 0.04
+    online = online_em_path(p, PI_S, 0.005)
+    assert np.abs(used[3000:3600] - 0.05).mean() < np.abs(online[3000:3600] - 0.05).mean()
+
+
+def test_cusum_false_alarms_fall_with_the_threshold_and_it_never_looks_ahead():
+    from model_eval_calibration.online_prior import cusum_em_path
+
+    counts = {h: [] for h in (4.0, 10.0)}
+    for s in range(3):
+        p, _ = _stream(np.full(6000, 0.3), 10 + s)
+        for h in counts:
+            counts[h].append(len(cusum_em_path(p, PI_S, threshold=h)[1]))
+    assert sum(counts[10.0]) <= 1 and sum(counts[4.0]) > sum(counts[10.0])
+    p, _ = _stream(np.r_[np.full(500, 0.3), np.full(500, 0.05)], 4)
+    base, _ = cusum_em_path(p, PI_S)
+    q = p.copy()
+    q[700:] = 0.99
+    alt, _ = cusum_em_path(q, PI_S)
+    assert np.array_equal(base[:701], alt[:701]) and not np.array_equal(base[701:], alt[701:])
+    with pytest.raises(ValueError):
+        cusum_em_path(p, PI_S, threshold=0)

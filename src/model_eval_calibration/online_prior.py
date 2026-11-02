@@ -23,6 +23,8 @@ per-row log-likelihood of a candidate prior needs only the source posterior
   of a 0.3 -> 0.05 jump, a 0.02 step ~100).
 * ``window_em_path`` -- full Saerens EM on the last ``window`` rows,
   warm-started from the previous estimate.
+* ``cusum_em_path`` -- EM on the rows since the last detected change,
+  with a two-sided Page CUSUM on the mixture likelihood to detect jumps.
 """
 
 from __future__ import annotations
@@ -92,3 +94,53 @@ def window_em_path(p: np.ndarray, source_prior: float, window: int, refit_every:
             pi = em_on(p[max(0, i - window) : i], source_prior, pi)
         out[i] = pi
     return out
+
+
+def cusum_em_path(p: np.ndarray, source_prior: float, threshold: float = 6.0, delta_logit: float = 0.8,
+                  min_rows: int = 100, max_rows: int = 2000, refit_every: int = 5,
+                  start: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Change-point-restarted EM: EM on the current segment, two-sided Page CUSUM to end it.
+
+    The prior used at row i is EM on rows [seg_start, i) (at most
+    ``max_rows`` back; at least the last ``min_rows`` rows, so a young
+    segment borrows a few pre-change rows). After row i is decided its
+    *unlabelled* source posterior feeds two CUSUM statistics, one per
+    direction, each the running log-likelihood ratio (``mixture_loglik``)
+    of the prior moved by +/- ``delta_logit`` on the logit scale against the
+    current estimate. When one exceeds ``threshold`` a change is declared;
+    the new segment starts where that statistic last left zero (Page's
+    change-point estimate) and EM refits there. Returns (prior used per
+    row, alarm rows).
+    """
+    p = _check(p, source_prior)
+    if threshold <= 0 or delta_logit <= 0 or not 1 <= min_rows <= max_rows or refit_every < 1:
+        raise ValueError("bad CUSUM settings")
+    pi = float(source_prior if start is None else start)
+    seg = 0
+    s_up = s_dn = 0.0
+    z_up = z_dn = 0  # row after which each statistic last sat at zero
+    out, alarms = np.empty(p.size), []
+    refit_at = 0
+    for i in range(p.size):
+        if i > 0 and (i >= refit_at or i - seg <= min_rows):
+            lo = max(min(seg, i - min_rows), i - max_rows, 0)
+            pi = em_on(p[lo:i], source_prior, pi)
+            refit_at = i + refit_every
+        out[i] = pi
+        lg = np.log(pi / (1.0 - pi))
+        up = 1.0 / (1.0 + np.exp(-(lg + delta_logit)))
+        dn = 1.0 / (1.0 + np.exp(-(lg - delta_logit)))
+        base = mixture_loglik(p[i : i + 1], source_prior, pi)[0]
+        s_up += mixture_loglik(p[i : i + 1], source_prior, up)[0] - base
+        s_dn += mixture_loglik(p[i : i + 1], source_prior, dn)[0] - base
+        if s_up <= 0:
+            s_up, z_up = 0.0, i + 1
+        if s_dn <= 0:
+            s_dn, z_dn = 0.0, i + 1
+        if s_up > threshold or s_dn > threshold:
+            alarms.append(i)
+            seg = z_up if s_up > threshold else z_dn
+            s_up = s_dn = 0.0
+            z_up = z_dn = i + 1
+            refit_at = i + 1  # refit on the new segment at the next row
+    return out, np.asarray(alarms, dtype=int)
