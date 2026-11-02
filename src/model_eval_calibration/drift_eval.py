@@ -34,7 +34,7 @@ from sklearn.base import clone
 from model_eval_calibration.block_length import pooled_block_length
 from model_eval_calibration.calibration_maps import make_calibration_maps
 from model_eval_calibration.costs import bayes_threshold, decisions, expected_cost, tune_threshold
-from model_eval_calibration.label_shift import sample_label_shift, true_posterior
+from model_eval_calibration.label_shift import class_params, sample_label_shift, true_posterior
 from model_eval_calibration.prior_estimation import adjust_posterior, bbse_prior, em_prior
 from model_eval_calibration.shift_eval import build_base_model
 
@@ -49,6 +49,53 @@ def prior_path(n_batches: int = 24, low: float = 0.06, high: float = 0.5, start:
     mid, amp = (low + high) / 2, (high - low) / 2
     path = mid - amp * np.sin(2 * np.pi * t + np.arcsin((mid - start) / amp))
     return np.clip(path, 1e-3, 1 - 1e-3)
+
+
+REGIME_LEVELS = (0.05, 0.1, 0.3, 0.5)
+DEFAULT_N_FEATURES = 6
+
+
+def smooth_row_path(n_rows: int = 9600, low: float = 0.06, high: float = 0.5, start: float = SOURCE_PRIOR) -> np.ndarray:
+    """Per-row version of ``prior_path``: the same cosine cycle evaluated at every row."""
+    return prior_path(n_rows, low, high, start)
+
+
+def regime_row_path(n_rows: int, rng: np.random.Generator, mean_duration: float = 1600.0,
+                    min_duration: int = 200, levels: tuple[float, ...] = REGIME_LEVELS,
+                    start: float = SOURCE_PRIOR) -> tuple[np.ndarray, np.ndarray]:
+    """Abrupt drift: piecewise-constant prior with jumps at random rows.
+
+    Segment lengths are ``min_duration`` + Geometric(1 / (mean_duration -
+    min_duration)) rows; at each switch the new level is drawn uniformly
+    from ``levels`` excluding the current one, so every switch is a real
+    jump. The first segment sits at ``start`` (the source prior). Returns
+    (per-row prior, sorted change-point rows).
+    """
+    if not 0 < min_duration < mean_duration:
+        raise ValueError("need 0 < min_duration < mean_duration")
+    if len(levels) < 2:
+        raise ValueError("need at least two levels")
+    path = np.empty(n_rows)
+    changes = []
+    i, level = 0, float(start)
+    while i < n_rows:
+        dur = min_duration + int(rng.geometric(1.0 / (mean_duration - min_duration)))
+        path[i : i + dur] = level
+        i += dur
+        if i < n_rows:
+            changes.append(i)
+            level = float(rng.choice([v for v in levels if not np.isclose(v, level)]))
+    return path, np.asarray(changes, dtype=int)
+
+
+def sample_row_stream(priors: np.ndarray, rng: np.random.Generator):
+    """One labelled row per entry of ``priors`` (P(x|y) fixed, so only the prior moves)."""
+    priors = np.asarray(priors, dtype=float)
+    y = (rng.random(priors.size) < priors).astype(int)
+    m, s = class_params(DEFAULT_N_FEATURES)
+    Xn = rng.standard_normal((priors.size, DEFAULT_N_FEATURES))
+    X = np.where(y[:, None] == 1, Xn * s + m, Xn)
+    return X, y
 
 
 def make_stream(priors: np.ndarray, batch_size: int, rng: np.random.Generator):
