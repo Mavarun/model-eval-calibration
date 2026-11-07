@@ -52,7 +52,10 @@ from model_eval_calibration.shift_eval import build_base_model
 N_ROWS = 9600
 CHUNK = 100
 POST_CHANGE_ROWS = 400
-DEFAULT_TRACKERS = {"online_step": 0.01, "window": 400, "cusum_threshold": 6.0}
+DEFAULT_TRACKERS = {"online_step": 0.01, "window": 400, "cusum_threshold": 6.0, "cusum_delta": 0.8}
+# Slice F: small jumps around the source prior (every switch moves 0.05-0.2).
+SMALL_REGIME_LEVELS = (0.2, 0.25, 0.3, 0.35, 0.4)
+PATH_KINDS = ("smooth", "regime", "small_regime")
 
 
 def make_target_stream(seed: int, path_kind: str, n_rows: int = N_ROWS):
@@ -62,6 +65,8 @@ def make_target_stream(seed: int, path_kind: str, n_rows: int = N_ROWS):
         priors, cps = smooth_row_path(n_rows), np.array([], dtype=int)
     elif path_kind == "regime":
         priors, cps = regime_row_path(n_rows, rng)
+    elif path_kind == "small_regime":
+        priors, cps = regime_row_path(n_rows, rng, levels=SMALL_REGIME_LEVELS)
     else:
         raise ValueError(f"unknown path kind {path_kind!r}")
     X, y = sample_row_stream(priors, rng)
@@ -115,7 +120,7 @@ def stream_decisions(p: np.ndarray, labels_visible: np.ndarray, pi_s: float, pri
     priors["batch400_em_prev"] = _batch_em(p, pi_s, 400, 1)
     priors["online_em"] = online_em_path(p, pi_s, tr["online_step"])
     priors["window_em"] = window_em_path(p, pi_s, int(tr["window"]), refit_every=10)
-    priors["cusum_em"] = cusum_em_path(p, pi_s, threshold=tr["cusum_threshold"])[0]
+    priors["cusum_em"] = cusum_em_path(p, pi_s, threshold=tr["cusum_threshold"], delta_logit=tr["cusum_delta"])[0]
     priors["oracle_prior"] = np.asarray(priors_true, dtype=float)
     t_bayes = bayes_threshold(C_FP, C_FN)
     dec = {k: decisions(adjust_posterior(p, pi_s, v), t_bayes) for k, v in priors.items()}
@@ -223,3 +228,58 @@ def select_trackers(base_model: str, dev_seeds=DEV_SEEDS, test_seeds=(), paths=(
     chosen = {name: score[score.tracker == name].sort_values(["cost", "value"]).iloc[0]["value"] for name in grids}
     chosen = {k: (int(v) if k == "window" else float(v)) for k, v in chosen.items()}
     return chosen, score
+
+
+# Slice F: the CUSUM drift size (delta, logit scale) was fixed at 0.8 in slice E.
+CUSUM_GRID = {"cusum_threshold": (3.0, 4.0, 6.0), "cusum_delta": (0.3, 0.5, 0.8, 1.2)}
+
+
+def select_cusum(base_model: str, dev_seeds=DEV_SEEDS, test_seeds=(), paths=PATH_KINDS,
+                 grid: dict | None = None, n_rows: int = N_ROWS) -> tuple[dict, pd.DataFrame]:
+    """Joint (threshold, delta) for the CUSUM tracker by mean per-row cost on development streams.
+
+    Same rules as ``select_trackers``: dev seeds must be disjoint from ``test_seeds``,
+    every path shape in ``paths`` is pooled, ties go to the smaller threshold and then
+    the smaller delta.
+    """
+    grid = grid or CUSUM_GRID
+    if set(dev_seeds) & set(test_seeds):
+        raise ValueError("dev and test seeds overlap")
+    t_bayes = bayes_threshold(C_FP, C_FN)
+    rows = []
+    for s in dev_seeds:
+        model, cmap, _, _, pi_s = fit_source(s, base_model)
+        for kind in paths:
+            priors, cps, X, y = make_target_stream(s, kind, n_rows)
+            p = cmap.transform(model.predict_proba(X)[:, 1])
+            for h in grid["cusum_threshold"]:
+                for d in grid["cusum_delta"]:
+                    path, alarms = cusum_em_path(p, pi_s, threshold=float(h), delta_logit=float(d))
+                    cost = _row_cost(y, decisions(adjust_posterior(p, pi_s, path), t_bayes)).mean()
+                    rows.append({"seed": s, "path": kind, "cusum_threshold": h, "cusum_delta": d, "cost": cost,
+                                 **detection_stats(alarms, cps, n_rows)})
+    dev = pd.DataFrame(rows)
+    score = dev.groupby(["cusum_threshold", "cusum_delta"])["cost"].mean().reset_index()
+    best = score.sort_values(["cost", "cusum_threshold", "cusum_delta"]).iloc[0]
+    return {"cusum_threshold": float(best.cusum_threshold), "cusum_delta": float(best.cusum_delta)}, dev
+
+
+def detection_stats(alarms: np.ndarray, change_points: np.ndarray, n_rows: int,
+                    horizon: int = POST_CHANGE_ROWS) -> dict:
+    """Share of true changes with an alarm within ``horizon`` rows, median delay, false alarms per 1000 rows.
+
+    An alarm is *true* if it falls in [c, c + horizon) for some change point c, else false.
+    """
+    alarms = np.asarray(alarms, dtype=int)
+    cps = np.asarray(change_points, dtype=int)
+    hit, delays = 0, []
+    true_alarm = np.zeros(alarms.size, dtype=bool)
+    for c in cps:
+        m = (alarms >= c) & (alarms < c + horizon)
+        true_alarm |= m
+        if m.any():
+            hit += 1
+            delays.append(int(alarms[m][0] - c))
+    return {"detected": hit / cps.size if cps.size else np.nan,
+            "median_delay": float(np.median(delays)) if delays else np.nan,
+            "false_alarms_per_1000": 1000.0 * int((~true_alarm).sum()) / n_rows}
