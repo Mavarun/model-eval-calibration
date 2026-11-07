@@ -6,10 +6,77 @@ Research slices on **model evaluation beyond accuracy**:
 2. **Slice B**: **adaptive / quantile ECE** + **nested CV calibration** on a harder synthetic binary task.
 3. **Slice C**: **calibration and conformal coverage under covariate shift** -- temperature / Platt / beta / isotonic maps, importance-weighted calibration, split vs weighted conformal sets, MCE and bootstrap CIs.
 4. **Slice D**: **label shift and cost-aware decisions** -- EM and BBSE target-prior estimation, Bayes vs source-tuned thresholds at c_fn = 5 c_fp, pooled vs Mondrian conformal, and a **walk-forward** run under a drifting prior with a label-leakage barrier and block-bootstrap CIs.
-5. **Slice E (this PR)**: **per-row decisions under smooth and abrupt prior drift** -- online EM, sliding-window EM and CUSUM-restarted EM trackers, batch-latency and delayed-label baselines, dev-seed tuning, and Politis-White bootstrap block lengths.
+5. **Slice E**: **per-row decisions under smooth and abrupt prior drift** -- online EM, sliding-window EM and CUSUM-restarted EM trackers, batch-latency and delayed-label baselines, dev-seed tuning, and Politis-White bootstrap block lengths.
+6. **Slice F (this PR)**: **small prior jumps and the CUSUM drift size** -- a small-jump regime path, joint (threshold, delta) selection on dev seeds, alarm detection rate / delay / false alarms.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice F hypothesis
+
+Slice E tested jumps between four far-apart levels and kept the CUSUM drift size at 0.8 logit. Slice F asks what happens with small jumps (0.05-0.2) around the source prior, and whether tuning the drift size helps. The hypotheses were written in the script docstring before any test stream was scored.
+
+1. On small jumps, slice E's CUSUM (h = 4, delta = 0.8) detects fewer changes and is not cheaper than online EM.
+2. A CUSUM with (threshold, delta) chosen on development seeds pooled over all three shapes is cheaper than slice E's setting on small jumps, at no cost on smooth drift.
+3. Every tracker gains less over the static prior on small jumps, because the static prior is never far from the truth.
+
+## Slice F method
+
+- **Small-jump path** (`stream_eval.make_target_stream(..., "small_regime")`): slice E's regime generator with levels {0.2, 0.25, 0.3, 0.35, 0.4}, so every switch moves the prior by 0.05-0.2. Segments and per-row sampling are unchanged.
+- **Selection** (`select_cusum`): (threshold, delta) on {3, 4, 6} x {0.3, 0.5, 0.8, 1.2}. The choice is made per base model by mean per-row cost on dev seeds 1000-1005, with smooth, regime and small-regime streams pooled. Test seeds 0-9 are disjoint (checked). Online step and window keep slice E's choice (0.02, 200).
+- **Alarms** (`detection_stats`): an alarm within 400 rows after a true change counts as a detection. Any other alarm is false.
+- **Grid**: 10 test seeds x 3 paths x 2 models, 9600 rows each. Paired CIs as in slice E. Run with `python scripts/run_small_jump_slice.py` (~8 min CPU).
+
+## Slice F results
+
+The dev grid was flat: every cell was within 0.008 cost per row. The picks were (6, 0.8) for logistic and (3, 0.3) for random forest.
+
+### Regret per row on test streams (mean ± std over 10 seeds)
+
+| policy | smooth logistic | smooth RF | regime logistic | regime RF | small-regime logistic | small-regime RF |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| static | 0.098 ± 0.008 | 0.100 ± 0.011 | 0.113 ± 0.028 | 0.112 ± 0.022 | 0.046 ± 0.016 | 0.043 ± 0.014 |
+| online EM | **0.034 ± 0.006** | **0.036 ± 0.008** | 0.048 ± 0.020 | 0.042 ± 0.011 | **0.036 ± 0.013** | **0.036 ± 0.009** |
+| CUSUM slice E (4, 0.8) | 0.041 ± 0.005 | 0.040 ± 0.007 | **0.045 ± 0.020** | **0.041 ± 0.012** | 0.037 ± 0.010 | 0.041 ± 0.008 |
+| CUSUM tuned | 0.040 ± 0.006 | 0.041 ± 0.008 | 0.045 ± 0.018 | 0.045 ± 0.014 | 0.038 ± 0.012 | 0.039 ± 0.007 |
+| oracle prior | 0.028 ± 0.006 | 0.028 ± 0.008 | 0.029 ± 0.013 | 0.025 ± 0.008 | 0.032 ± 0.011 | 0.034 ± 0.008 |
+
+### CUSUM alarms (mean over 10 test seeds)
+
+| path | setting (logistic / RF) | detected | median delay (rows) | false alarms per 1000 rows |
+| --- | --- | ---: | ---: | ---: |
+| smooth | slice E | - | - | 1.42 / 1.45 |
+| smooth | tuned | - | - | 0.52 / 0.92 |
+| regime | slice E | 0.90 / 0.86 | 51 / 55 | 0.75 / 0.88 |
+| regime | tuned | 0.90 / 0.92 | 80 / 92 | 0.04 / 0.31 |
+| small regime | slice E | 0.64 / 0.72 | 114 / 115 | 1.20 / 1.34 |
+| small regime | tuned | 0.46 / 0.64 | 142 / 171 | 0.13 / 0.41 |
+
+### Paired cost differences a - b (95% CI; logistic / random forest)
+
+| path | a - b | logistic | random forest |
+| --- | --- | --- | --- |
+| small regime | CUSUM tuned - CUSUM slice E | +0.0014 [-0.0018, +0.0049] | -0.0021 [-0.0061, +0.0015] |
+| small regime | CUSUM slice E - online EM | +0.0008 [-0.0029, +0.0043] | **+0.0049 [+0.0013, +0.0085]** |
+| small regime | online EM - static | -0.0097 [-0.0162, -0.0032] | -0.0071 [-0.0167, +0.0008] |
+| smooth | CUSUM tuned - CUSUM slice E | -0.0010 [-0.0044, +0.0023] | +0.0001 [-0.0031, +0.0032] |
+| regime | CUSUM tuned - CUSUM slice E | +0.0000 [-0.0042, +0.0035] | **+0.0043 [+0.0001, +0.0090]** |
+| regime | online EM - static | -0.0658 [-0.0855, -0.0473] | -0.0706 [-0.0886, -0.0537] |
+
+### Reading the results
+
+- **H1 supported.** Slice E's CUSUM catches 0.64 / 0.72 of small jumps, against 0.90 / 0.86 of large ones, and takes about twice as long (114-115 rows vs 51-55). It is never cheaper than online EM on small jumps: logistic +0.0008 (CI covers 0), and random forest +0.0049, a **regression** whose CI excludes 0.
+- **H2 not supported.** Tuning the drift size bought nothing measurable. On small jumps the tuned CUSUM is within ±0.002 of slice E's setting, and both CIs cover 0. It cuts false alarms (smooth 1.42 to 0.52 and 1.45 to 0.92; regime 0.75 to 0.04) but detects later and less often. On large jumps the random-forest pick (3, 0.3) is a **regression**: +0.0043, CI just excludes 0, post-change regret 0.071 to 0.092. Fewer false alarms did not turn into lower cost.
+- **H3 supported.** Online EM saves 0.064-0.071 per row over the static prior on smooth and large-jump streams, but only 0.007-0.010 on small jumps. For random forest the CI covers 0. With the prior never far from 0.3, tracking noise eats most of the gain.
+- **Decision:** online EM stays the default. The CUSUM drift size stays at 0.8, and the tuned setting is not adopted.
+
+### Test design (slice F)
+
+- The small-regime path only takes levels in {0.2 .. 0.4}, every jump is 0.05-0.2, and its change points are exactly where the level moves.
+- The drift size reaches the tracker (changing delta changes only the CUSUM prior). `select_cusum` refuses overlapping seeds and returns the dev argmin. Detection stats separate true, late and false alarms.
+- `tests/test_slice_f_claims.py` re-checks H1 and H3 on 3 seeds.
+
+---
 
 ## Slice E hypothesis
 
@@ -363,7 +430,8 @@ Raw logistic was already well calibrated. Extra calibration **hurt** ECE/Brier h
 ## Assumptions and limits / weaknesses
 
 - **Slice E is fully synthetic** and keeps exact label shift: P(x|y) never moves, so every tracker is estimating the right quantity. Real streams mix in covariate and concept drift; the CUSUM statistic then alarms on drift that a prior correction cannot fix.
-- The regime path draws its jumps from four fixed levels with segments of about 1600 rows. Shorter regimes, small jumps (for example 0.3 -> 0.25) or gradual-then-abrupt mixtures are not tested, and the CUSUM drift size (0.8 logit) is fixed rather than tuned.
+- **Slice F** keeps exact label shift and one segment-length distribution (about 1600 rows). Small jumps are tested, but shorter regimes and gradual-then-abrupt mixtures are not. The (threshold, delta) grid is coarse (3 x 4), its dev surface was flat, and only 6 dev seeds pick it. A detector that adapts its drift size online is not tried.
+- The slice E regime path draws its jumps from four fixed levels with segments of about 1600 rows.
 - Tracker settings are tuned on only 6 development seeds, and one setting per model is shared across both drift shapes. A per-shape choice would need a drift-type detector, which is not built.
 - The delayed-label baseline uses one delay (400 rows) and one window (400). Shorter label delays would narrow its gap.
 - The block bootstrap runs on 100-row chunk means. The Politis-White rule picked blocks of 2-6 chunks; within-chunk dependence is averaged out, not modelled.
@@ -406,7 +474,7 @@ src/model_eval_calibration/
   drift_eval.py     # walk-forward drift policies, per-row / regime prior paths, leakage probe, block bootstrap
   block_length.py   # Politis-White (PPW 2009) circular-block bootstrap block length
   online_prior.py   # slice E: online EM, window EM, CUSUM-restarted EM (past rows only)
-  stream_eval.py    # slice E harness: per-row policies, dev-seed tuning, post-change regret
+  stream_eval.py    # slice E/F harness: per-row policies, dev-seed tuning, post-change regret, small-jump path, CUSUM selection
   nested.py         # naive same-fold vs nested CV evaluator + barrier helper
   evaluate.py       # OOF raw vs calibrated comparison harness (slice A)
   data.py           # breast_cancer + hard make_classification loaders
@@ -415,6 +483,7 @@ scripts/run_nested_calibration_slice.py
 scripts/run_shift_conformal_slice.py
 scripts/run_label_shift_slice.py
 scripts/run_drift_stream_slice.py
+scripts/run_small_jump_slice.py
 .github/workflows/tests.yml   # pytest on push / PR (py3.11, py3.12)
 tests/
 ```
