@@ -7,10 +7,66 @@ Research slices on **model evaluation beyond accuracy**:
 3. **Slice C**: **calibration and conformal coverage under covariate shift** -- temperature / Platt / beta / isotonic maps, importance-weighted calibration, split vs weighted conformal sets, MCE and bootstrap CIs.
 4. **Slice D**: **label shift and cost-aware decisions** -- EM and BBSE target-prior estimation, Bayes vs source-tuned thresholds at c_fn = 5 c_fp, pooled vs Mondrian conformal, and a **walk-forward** run under a drifting prior with a label-leakage barrier and block-bootstrap CIs.
 5. **Slice E**: **per-row decisions under smooth and abrupt prior drift** -- online EM, sliding-window EM and CUSUM-restarted EM trackers, batch-latency and delayed-label baselines, dev-seed tuning, and Politis-White bootstrap block lengths.
-6. **Slice F (this PR)**: **small prior jumps and the CUSUM drift size** -- a small-jump regime path, joint (threshold, delta) selection on dev seeds, alarm detection rate / delay / false alarms.
+6. **Slice F**: **small prior jumps and the CUSUM drift size** -- a small-jump regime path, joint (threshold, delta) selection on dev seeds, alarm detection rate / delay / false alarms.
+7. **Slice G (this PR)**: **multiclass calibration** -- top-label vs classwise ECE, temperature vs vector scaling on two datasets x three models, pre-registered. Temperature ships ON as the multiclass default; vector scaling stays OFF.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice G hypothesis (pre-registered)
+
+Every earlier slice is binary. Slice G asks whether the simplest multiclass post-hoc map is worth making the default, and whether a richer one beats it. The rules are in `multiclass_eval.PREREGISTERED` and were committed before evaluation seeds 0-9 were run.
+
+1. **H1 (temperature).** Temperature scaling becomes the multiclass default iff, in >= 4 of the 6 (dataset, model) cells, it lowers test classwise ECE vs no map on >= 7 of 10 seeds, and in no cell raises mean test NLL by more than 0.01.
+2. **H2 (vector over temperature).** Vector scaling replaces it iff it lowers classwise ECE vs temperature on >= 7 of 10 seeds in >= 4 of 6 cells, with accuracy no more than 0.005 lower and NLL no more than 0.01 higher in every cell.
+
+## Slice G method
+
+- **Metrics** (`multiclass.py`): top-label ECE (15 equal-width bins on max p), classwise ECE (mean over classes of the binary ECE of p_k, 15 equal-mass bins), multiclass Brier and NLL.
+- **Maps**: temperature, softmax(log p / T); vector scaling, softmax(w log p + b) with per-class w, b and a small L2 pull to the identity. Both fitted by NLL with analytic gradients.
+- **Data and models** (`multiclass_eval.py`): `digits` (1797 rows, 10 classes) and `synth5` (6000 rows, 5 classes, 10% label noise) x logistic regression, random forest (200 trees), Gaussian naive Bayes. Per seed: stratified train 50% / calibration 20% / test 30%; every number is on test. Run with `python scripts/run_multiclass_slice.py` (~20 s).
+
+## Slice G results (10 seeds; `results/slice_g_report.md`)
+
+### Classwise ECE / NLL on test (mean over 10 seeds)
+
+| dataset | model | none | temperature | vector |
+| --- | --- | ---: | ---: | ---: |
+| digits | logistic | 0.0043 / 0.126 | 0.0036 / 0.122 | 0.0043 / 0.130 |
+| digits | random_forest | 0.0400 / 0.365 | 0.0032 / 0.092 | 0.0046 / 0.099 |
+| digits | naive_bayes | 0.0267 / 2.551 | 0.0282 / 0.584 | 0.0183 / 0.562 |
+| synth5 | logistic | 0.0321 / 1.249 | 0.0329 / 1.250 | 0.0336 / 1.249 |
+| synth5 | random_forest | 0.0792 / 0.936 | 0.0290 / 0.852 | 0.0294 / 0.853 |
+| synth5 | naive_bayes | 0.0586 / 1.361 | 0.0368 / 1.246 | 0.0335 / 1.238 |
+
+### Paired per-cell effects (seeds with lower classwise ECE)
+
+| dataset | model | temperature vs none | vector vs temperature |
+| --- | --- | ---: | ---: |
+| digits | logistic | 10/10 | 4/10 |
+| digits | random_forest | 10/10 | 0/10 |
+| digits | naive_bayes | 3/10 | 10/10 |
+| synth5 | logistic | 4/10 | 4/10 |
+| synth5 | random_forest | 10/10 | 2/10 |
+| synth5 | naive_bayes | 10/10 | 8/10 |
+
+### Decisions
+
+- **H1 passes: temperature ships ON** as the multiclass default (`RECOMMENDED_MULTICLASS_MAP`, `fit_multiclass_map`). It wins 10/10 seeds in 4 cells; the biggest gains are the random forests (classwise ECE 0.040 -> 0.003 on digits, 0.079 -> 0.029 on synth5), and it never moves accuracy.
+- **H2 fails: vector scaling stays OFF.** It beats temperature in only the two naive Bayes cells (where it also adds +0.030 accuracy on digits) and wins 0/10 seeds on the digits random forest.
+
+### Post-hoc reading (decides nothing; `results/slice_g_saturation.csv`)
+
+- The fitted temperatures point in opposite directions: random forests are under-confident (mean T 0.25 on digits, 0.59 on synth5, so the map sharpens), naive Bayes is over-confident (T 6.0 on digits).
+- Temperature *raises* classwise ECE in one cell, digits naive Bayes, while cutting its NLL from 2.55 to 0.58. That base model is saturated: 89% of its test rows have max p > 0.999. One T cannot soften the top class without spreading the same mass evenly over the other nine, which is exactly what classwise ECE punishes. Vector scaling's per-class bias is what helps there.
+- Synth5 logistic is already calibrated (T 1.04), and both maps only add noise there.
+
+### Weaknesses (slice G)
+
+- Two datasets and three models; `digits` is small (540 test rows, 54 per class), so classwise ECE with 15 bins per class rests on few rows per bin.
+- Equal-mass classwise ECE is one choice of estimator; with equal-width bins, or with a debiased estimator, the small cells (digits logistic, diff -0.0006) could flip.
+- The 4-of-6 rule counts cells, not effect sizes: one of the four wins (digits logistic) is tiny, so H1 rests on three clear cells and one marginal one.
+- No Dirichlet / matrix scaling, no ensembles or neural nets, and no shift between calibration and test.
 
 ## Slice F hypothesis
 
@@ -358,6 +414,8 @@ python scripts/run_nested_calibration_slice.py   # slice B (hard binary + nested
 python scripts/run_shift_conformal_slice.py     # slice C (covariate shift + conformal)
 python scripts/run_label_shift_slice.py         # slice D (label shift, costs, walk-forward)
 python scripts/run_drift_stream_slice.py        # slice E (per-row decisions, abrupt drift, online priors)
+python scripts/run_small_jump_slice.py          # slice F (small prior jumps, CUSUM drift size)
+python scripts/run_multiclass_slice.py          # slice G (multiclass temperature vs vector scaling)
 ```
 
 ## Slice B results (make_classification_hard_binary, n=1200, outer=5, inner=3)
@@ -478,19 +536,23 @@ src/model_eval_calibration/
   nested.py         # naive same-fold vs nested CV evaluator + barrier helper
   evaluate.py       # OOF raw vs calibrated comparison harness (slice A)
   data.py           # breast_cancer + hard make_classification loaders
+  multiclass.py     # slice G: top-label / classwise ECE, multiclass Brier / NLL, temperature + vector scaling, default map
+  multiclass_eval.py # slice G harness: digits / synth5 x 3 models, pre-registered H1/H2, saturation post-hoc
 scripts/run_calibration_slice.py
 scripts/run_nested_calibration_slice.py
 scripts/run_shift_conformal_slice.py
 scripts/run_label_shift_slice.py
 scripts/run_drift_stream_slice.py
 scripts/run_small_jump_slice.py
+scripts/run_multiclass_slice.py
+results/                      # slice G grid, decisions, report, saturation (committed)
 .github/workflows/tests.yml   # pytest on push / PR (py3.11, py3.12)
 tests/
 ```
 
 ## Next slices (not done)
 
-- Multiclass calibration and classwise reliability
+- Dirichlet / matrix scaling and multiclass calibration under shift (slice G covers temperature and vector scaling without shift)
 - Temperature scaling for neural nets (binary temperature is done in slice C; multiclass logits are not)
 - Real-data shift benchmarks (e.g. time-split public tabular sets) for the slice C / D methods
 - Mixed label + covariate shift; multiclass BBSE / EM with a regularised confusion matrix
