@@ -189,17 +189,23 @@ class DirichletScaling:
     (ODIR) pulls the *off-diagonal* entries of ``W`` and the intercepts ``b`` to zero:
     ``lam * (sum_{i != j} W_ij^2 / (k (k - 1)) + sum_j b_j^2 / k)``. The diagonal is free, so
     with a large ``lam`` the map degrades to vector scaling without the bias, not to the identity.
-    ``lam=None`` picks it from :attr:`LAMBDAS` by 3-fold stratified CV NLL on the calibration
-    rows only (ties go to the larger, simpler value).
+    ``lam=None`` picks it from ``lambdas`` (default :attr:`LAMBDAS`; slice I tests
+    :attr:`WIDE_LAMBDAS`) by 3-fold stratified CV NLL on the calibration rows only (ties go to
+    the larger, simpler value).
     """
 
     LAMBDAS = (1e-4, 1e-3, 1e-2, 1e-1, 1.0)
+    # Slice I: slice H's CV picked the top of LAMBDAS in 38 of 60 fits (an edge solution).
+    WIDE_LAMBDAS = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0)
 
-    def __init__(self, lam: float | None = None, seed: int = 0) -> None:
+    def __init__(self, lam: float | None = None, seed: int = 0, lambdas: tuple[float, ...] | None = None) -> None:
         if lam is not None and lam < 0:
             raise ValueError("lam must be >= 0")
+        if lambdas is not None and (len(lambdas) == 0 or min(lambdas) < 0):
+            raise ValueError("lambdas must be a non-empty tuple of values >= 0")
         self.lam = lam
         self.seed = seed
+        self.lambdas = tuple(lambdas) if lambdas is not None else self.LAMBDAS
         self.lam_: float | None = None
         self.W_: np.ndarray | None = None
         self.b_: np.ndarray | None = None
@@ -233,7 +239,7 @@ class DirichletScaling:
 
             folds = list(StratifiedKFold(3, shuffle=True, random_state=self.seed).split(z, y))
             scores = []
-            for cand in self.LAMBDAS:
+            for cand in self.lambdas:
                 nll = 0.0
                 for tr, va in folds:
                     w, b = self._fit(z[tr], y[tr], cand)
@@ -241,7 +247,7 @@ class DirichletScaling:
                     nll -= ls[np.arange(va.size), y[va]].sum()
                 scores.append(nll / y.size)
             best = min(scores)
-            lam = max(c for c, s in zip(self.LAMBDAS, scores) if s <= best + 1e-9)
+            lam = max(c for c, s in zip(self.lambdas, scores) if s <= best + 1e-9)
         self.lam_ = float(lam)
         self.W_, self.b_ = self._fit(z, y, lam)
         return self
