@@ -8,10 +8,60 @@ Research slices on **model evaluation beyond accuracy**:
 4. **Slice D**: **label shift and cost-aware decisions** -- EM and BBSE target-prior estimation, Bayes vs source-tuned thresholds at c_fn = 5 c_fp, pooled vs Mondrian conformal, and a **walk-forward** run under a drifting prior with a label-leakage barrier and block-bootstrap CIs.
 5. **Slice E**: **per-row decisions under smooth and abrupt prior drift** -- online EM, sliding-window EM and CUSUM-restarted EM trackers, batch-latency and delayed-label baselines, dev-seed tuning, and Politis-White bootstrap block lengths.
 6. **Slice F**: **small prior jumps and the CUSUM drift size** -- a small-jump regime path, joint (threshold, delta) selection on dev seeds, alarm detection rate / delay / false alarms.
-7. **Slice G (this PR)**: **multiclass calibration** -- top-label vs classwise ECE, temperature vs vector scaling on two datasets x three models, pre-registered. Temperature ships ON as the multiclass default; vector scaling stays OFF.
+7. **Slice G**: **multiclass calibration** -- top-label vs classwise ECE, temperature vs vector scaling on two datasets x three models, pre-registered. Temperature ships ON as the multiclass default; vector scaling stays OFF.
+8. **Slice H (this PR)**: **Dirichlet (matrix) scaling** with ODIR, pre-registered on fresh seeds, and slice G's call re-scored with a debiased estimator. Dirichlet stays OFF; temperature stays the default.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice H hypothesis (pre-registered)
+
+Slice G left two gaps: no matrix map, and a call that rested on one estimator of classwise ECE. The rules are in
+`multiclass_h.PREREGISTERED` and were committed before evaluation seeds 20-29 were run.
+
+1. **H3 (Dirichlet over temperature).** Dirichlet scaling replaces temperature iff, on fresh seeds 20-29, it lowers
+   test classwise ECE vs temperature on >= 7 of 10 seeds in >= 4 of 6 cells, with accuracy no more than 0.005 lower
+   and NLL no more than 0.01 higher in every cell (slice G's H2 bar).
+2. **H4 (H1 under a second estimator).** Slice G's H1 is re-scored on its own seeds 0-9 with
+   `classwise_ce_debiased` (Kumar et al., 2019). Those seeds are already seen, so this can only add a caveat.
+
+## Slice H method
+
+- `DirichletScaling` (`multiclass.py`): softmax(log p W^T + b) with ODIR, an L2 pull of the off-diagonal of W and of b
+  to zero (Kull et al., 2019). The diagonal is free. lambda comes from {1e-4, ..., 1} by 3-fold CV NLL on the
+  calibration rows only.
+- Same datasets, models and 50 / 20 / 30 splits as slice G (`multiclass_h.py`). Run `python scripts/run_slice_h.py` (~1.5 min).
+
+## Slice H results (seeds 20-29; `results/slice_h_grid.csv`, `results/slice_h_decisions.json`)
+
+Classwise ECE / NLL on test (mean over 10 seeds), and Dirichlet vs temperature:
+
+| dataset | model | none | temperature | dirichlet | Dirichlet ECE wins | accuracy diff |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| digits | logistic | 0.0052 / 0.140 | 0.0045 / 0.138 | 0.0065 / 0.483 | 1/10 | -0.015 |
+| digits | random_forest | 0.0397 / 0.367 | 0.0039 / 0.097 | 0.0045 / 0.225 | 3/10 | -0.008 |
+| digits | naive_bayes | 0.0290 / 2.794 | 0.0298 / 0.627 | 0.0154 / 0.813 | 10/10 | +0.044 |
+| synth5 | logistic | 0.0357 / 1.282 | 0.0361 / 1.282 | 0.0361 / 1.277 | 4/10 | +0.003 |
+| synth5 | random_forest | 0.0815 / 0.939 | 0.0289 / 0.848 | 0.0280 / 0.851 | 7/10 | -0.001 |
+| synth5 | naive_bayes | 0.0542 / 1.342 | 0.0374 / 1.264 | 0.0324 / 1.238 | 9/10 | +0.013 |
+
+- **H3 fails, so Dirichlet stays OFF.** It wins in only 3 cells: both naive Bayes cells (where, like vector scaling in slice G,
+  it also adds accuracy) and synth5 forest (7/10). On digits it over-fits: k(k+1) = 110 parameters on 360 calibration
+  rows cost +0.35 NLL and 1.5 points of accuracy for logistic.
+- **H4 passes.** Under the debiased estimator, temperature still beats none on >= 7 of 10 seeds in 4 cells
+  (per cell: 0/10 | 10/10 | 10/10 | 4/10 | 10/10 | 10/10). digits logistic, the marginal slice G cell, now ties at 0 wins: both estimates are
+  at the floor. So H1 holds, but it rests on three clear cells plus one where the estimators disagree.
+
+Post-hoc (decides nothing; `results/slice_h_posthoc_edge.json`, `results/slice_h_posthoc_lambda.csv`): CV chose the
+largest grid lambda in 38 of 60 fits, an edge solution. On the dev seeds only, lambda 100 cuts digits NLL (logistic
+0.189 → 0.142, naive Bayes 0.696 → 0.521), but logistic still trails temperature (0.110). A future pre-registration
+should widen the grid; these seeds cannot be used to claim it.
+
+### Weaknesses (slice H)
+
+- The lambda grid was too narrow, so H3 tested a weaker Dirichlet than the method allows.
+- Still two datasets and three models, no shift between calibration and test, and digits test sets of 540 rows.
+- The debiased estimator clips at zero, so cells that are already calibrated tie instead of ranking.
 
 ## Slice G hypothesis (pre-registered)
 
@@ -552,7 +602,7 @@ tests/
 
 ## Next slices (not done)
 
-- Dirichlet / matrix scaling and multiclass calibration under shift (slice G covers temperature and vector scaling without shift)
+- Dirichlet scaling with a wider pre-registered lambda grid (slice H's CV sat at the grid edge), and multiclass calibration under shift
 - Temperature scaling for neural nets (binary temperature is done in slice C; multiclass logits are not)
 - Real-data shift benchmarks (e.g. time-split public tabular sets) for the slice C / D methods
 - Mixed label + covariate shift; multiclass BBSE / EM with a regularised confusion matrix
