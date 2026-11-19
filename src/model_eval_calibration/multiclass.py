@@ -68,6 +68,40 @@ def classwise_ece(y, p, n_bins: int = 15, adaptive: bool = True) -> float:
     return float(np.mean([_binned_gap(p[:, j], (y == j).astype(float), n_bins, adaptive) for j in range(k)]))
 
 
+def _debiased_sq_gap(conf, hit, n_bins):
+    """Debiased squared L2 calibration error over equal-mass bins (Kumar et al., 2019).
+
+    The plug-in sum_b w_b (hit_b - conf_b)^2 is biased upward by each bin's sampling variance
+    of the hit rate; subtracting hit_b (1 - hit_b) / (n_b - 1) per bin removes that bias to
+    first order, so a calibrated model scores ~0 instead of a positive floor. Can be negative.
+    """
+    n = conf.size
+    order = np.argsort(conf, kind="mergesort")
+    bins = np.empty(n, dtype=int)
+    bins[order] = np.minimum((np.arange(n) * n_bins) // n, n_bins - 1)
+    total = 0.0
+    for b in range(n_bins):
+        m = bins == b
+        nb = int(m.sum())
+        if nb < 2:
+            continue
+        hb = hit[m].mean()
+        total += nb / n * ((hb - conf[m].mean()) ** 2 - hb * (1.0 - hb) / (nb - 1))
+    return float(total)
+
+
+def classwise_ce_debiased(y, p, n_bins: int = 15) -> float:
+    """Classwise calibration error with the debiased L2 estimator: sqrt(max(0, mean_k CE_k^2)).
+
+    A second estimator for slice G2. Binned ECE has a positive floor that grows as bins get
+    small, so a map that only changes how many rows sit in sparse bins can move ECE without
+    changing calibration; the debiased estimate is far less sensitive to that.
+    """
+    y, p = _check(y, p)
+    sq = np.mean([_debiased_sq_gap(p[:, j], (y == j).astype(float), n_bins) for j in range(p.shape[1])])
+    return float(np.sqrt(max(0.0, sq)))
+
+
 def multiclass_brier(y, p) -> float:
     """Mean over rows of sum_k (p_k - 1[y = k])^2 (range [0, 2])."""
     y, p = _check(y, p)
