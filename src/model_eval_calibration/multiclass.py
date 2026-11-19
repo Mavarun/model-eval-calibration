@@ -1,4 +1,4 @@
-"""Multiclass calibration metrics (slice G).
+"""Multiclass calibration metrics and post-hoc maps (slice G).
 
 Binary tools elsewhere in the package look at one probability per row. With K classes there
 are three common views of "calibrated", and they disagree:
@@ -8,11 +8,21 @@ are three common views of "calibrated", and they disagree:
 * **classwise ECE**: for every class k, the binary ECE of (1[y = k], p_k), averaged over k
   (Kull et al., 2019). Sees miscalibration in minority classes and in second choices.
 * **multiclass Brier / log loss**: proper scores over the full vector.
+
+Maps act on the frozen base model's log-probabilities ``z = log p`` (shift-invariant per row):
+
+* ``MulticlassTemperature``: softmax(z / T), one parameter, keeps the argmax.
+* ``VectorScaling``: softmax(w * z + b) with per-class w, b (2K parameters, L2 on w - 1 and b),
+  can move the argmax.
+
+Both are fitted by minimising mean multiclass NLL on calibration rows with L-BFGS-B.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from scipy.optimize import minimize
+from scipy.special import log_softmax
 
 _EPS = 1e-12
 
@@ -68,3 +78,71 @@ def multiclass_brier(y, p) -> float:
 def multiclass_nll(y, p) -> float:
     y, p = _check(y, p)
     return float(-np.mean(np.log(np.clip(p[np.arange(y.size), y], _EPS, 1.0))))
+
+
+def _logp(p):
+    return np.log(np.clip(np.asarray(p, dtype=float), _EPS, 1.0))
+
+
+class MulticlassTemperature:
+    """softmax(log p / T), T > 0 fitted by NLL on calibration rows."""
+
+    def __init__(self) -> None:
+        self.T_: float | None = None
+
+    def fit(self, p, y):
+        y, p = _check(y, p)
+        z = _logp(p)
+
+        def f(theta):
+            t = np.exp(theta[0])
+            ls = log_softmax(z / t, axis=1)
+            nll = -ls[np.arange(y.size), y].mean()
+            q = np.exp(ls)
+            # theta = log T: d nll / d theta = mean_i (z_iy - sum_k q_ik z_ik) / T
+            g = np.mean(z[np.arange(y.size), y] - np.sum(q * z, axis=1)) / t
+            return nll, np.array([g])
+
+        r = minimize(f, x0=np.zeros(1), jac=True, method="L-BFGS-B", bounds=[(-5.0, 5.0)])
+        self.T_ = float(np.exp(r.x[0]))
+        return self
+
+    def transform(self, p) -> np.ndarray:
+        if self.T_ is None:
+            raise RuntimeError("fit first")
+        return np.exp(log_softmax(_logp(p) / self.T_, axis=1))
+
+
+class VectorScaling:
+    """softmax(w * log p + b), per-class w and b, with an L2 penalty ``reg`` on (w - 1, b)."""
+
+    def __init__(self, reg: float = 1e-3) -> None:
+        if reg < 0:
+            raise ValueError("reg must be >= 0")
+        self.reg = reg
+        self.w_: np.ndarray | None = None
+        self.b_: np.ndarray | None = None
+
+    def fit(self, p, y):
+        y, p = _check(y, p)
+        z = _logp(p)
+        n, k = z.shape
+        onehot = np.eye(k)[y]
+
+        def f(theta):
+            w, b = theta[:k], theta[k:]
+            ls = log_softmax(z * w + b, axis=1)
+            nll = -np.sum(ls * onehot) / n + self.reg * (np.sum((w - 1) ** 2) + np.sum(b ** 2))
+            r = (np.exp(ls) - onehot) / n
+            gw = np.sum(r * z, axis=0) + 2 * self.reg * (w - 1)
+            gb = np.sum(r, axis=0) + 2 * self.reg * b
+            return nll, np.concatenate([gw, gb])
+
+        r = minimize(f, x0=np.concatenate([np.ones(k), np.zeros(k)]), jac=True, method="L-BFGS-B")
+        self.w_, self.b_ = r.x[:k], r.x[k:]
+        return self
+
+    def transform(self, p) -> np.ndarray:
+        if self.w_ is None:
+            raise RuntimeError("fit first")
+        return np.exp(log_softmax(_logp(p) * self.w_ + self.b_, axis=1))
