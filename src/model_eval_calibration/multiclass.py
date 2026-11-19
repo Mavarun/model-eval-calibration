@@ -182,6 +182,76 @@ class VectorScaling:
         return np.exp(log_softmax(_logp(p) * self.w_ + self.b_, axis=1))
 
 
+class DirichletScaling:
+    """Matrix ("Dirichlet") calibration: softmax(log p @ W.T + b) with ODIR regularisation.
+
+    Kull et al. (2019). ``W`` is a full k x k matrix started at the identity; the penalty
+    (ODIR) pulls the *off-diagonal* entries of ``W`` and the intercepts ``b`` to zero:
+    ``lam * (sum_{i != j} W_ij^2 / (k (k - 1)) + sum_j b_j^2 / k)``. The diagonal is free, so
+    with a large ``lam`` the map degrades to vector scaling without the bias, not to the identity.
+    ``lam=None`` picks it from :attr:`LAMBDAS` by 3-fold stratified CV NLL on the calibration
+    rows only (ties go to the larger, simpler value).
+    """
+
+    LAMBDAS = (1e-4, 1e-3, 1e-2, 1e-1, 1.0)
+
+    def __init__(self, lam: float | None = None, seed: int = 0) -> None:
+        if lam is not None and lam < 0:
+            raise ValueError("lam must be >= 0")
+        self.lam = lam
+        self.seed = seed
+        self.lam_: float | None = None
+        self.W_: np.ndarray | None = None
+        self.b_: np.ndarray | None = None
+
+    @staticmethod
+    def _fit(z, y, lam):
+        n, k = z.shape
+        onehot = np.eye(k)[y]
+        off = 1.0 - np.eye(k)
+        cw, cb = lam / max(k * (k - 1), 1), lam / k
+
+        def f(theta):
+            w, b = theta[: k * k].reshape(k, k), theta[k * k:]
+            ls = log_softmax(z @ w.T + b, axis=1)
+            nll = -np.sum(ls * onehot) / n + cw * np.sum((w * off) ** 2) + cb * np.sum(b ** 2)
+            r = (np.exp(ls) - onehot) / n
+            gw = r.T @ z + 2 * cw * w * off
+            gb = r.sum(axis=0) + 2 * cb * b
+            return nll, np.concatenate([gw.ravel(), gb])
+
+        r = minimize(f, x0=np.concatenate([np.eye(k).ravel(), np.zeros(k)]), jac=True, method="L-BFGS-B",
+                     options={"maxiter": 2000})
+        return r.x[: k * k].reshape(k, k), r.x[k * k:]
+
+    def fit(self, p, y):
+        y, p = _check(y, p)
+        z = _logp(p)
+        lam = self.lam
+        if lam is None:
+            from sklearn.model_selection import StratifiedKFold
+
+            folds = list(StratifiedKFold(3, shuffle=True, random_state=self.seed).split(z, y))
+            scores = []
+            for cand in self.LAMBDAS:
+                nll = 0.0
+                for tr, va in folds:
+                    w, b = self._fit(z[tr], y[tr], cand)
+                    ls = log_softmax(z[va] @ w.T + b, axis=1)
+                    nll -= ls[np.arange(va.size), y[va]].sum()
+                scores.append(nll / y.size)
+            best = min(scores)
+            lam = max(c for c, s in zip(self.LAMBDAS, scores) if s <= best + 1e-9)
+        self.lam_ = float(lam)
+        self.W_, self.b_ = self._fit(z, y, lam)
+        return self
+
+    def transform(self, p) -> np.ndarray:
+        if self.W_ is None:
+            raise RuntimeError("fit first")
+        return np.exp(log_softmax(_logp(p) @ self.W_.T + self.b_, axis=1))
+
+
 # Slice G, pre-registered H1 passed and H2 failed (results/slice_g_decisions.json): temperature
 # lowered test classwise ECE on 10/10 seeds in 4 of 6 (dataset, model) cells without raising NLL
 # by more than 0.01 anywhere; vector scaling beat it in only 2 cells (both naive Bayes).
@@ -189,7 +259,7 @@ RECOMMENDED_MULTICLASS_MAP = "temperature"
 
 
 def fit_multiclass_map(p_cal, y_cal, method: str = RECOMMENDED_MULTICLASS_MAP):
-    """Fit a post-hoc multiclass map on calibration rows; ``method`` in {'temperature', 'vector', 'none'}.
+    """Fit a post-hoc multiclass map on calibration rows; ``method`` in {'temperature', 'vector', 'dirichlet', 'none'}.
 
     The default is the slice-G recommendation. ``'none'`` returns an object whose ``transform`` is
     the identity, so callers can switch calibration off without branching.
@@ -198,10 +268,12 @@ def fit_multiclass_map(p_cal, y_cal, method: str = RECOMMENDED_MULTICLASS_MAP):
         return MulticlassTemperature().fit(p_cal, y_cal)
     if method == "vector":
         return VectorScaling().fit(p_cal, y_cal)
+    if method == "dirichlet":
+        return DirichletScaling().fit(p_cal, y_cal)
     if method == "none":
         _check(y_cal, p_cal)
         return _Identity()
-    raise ValueError("method must be 'temperature', 'vector' or 'none'")
+    raise ValueError("method must be 'temperature', 'vector', 'dirichlet' or 'none'")
 
 
 class _Identity:
