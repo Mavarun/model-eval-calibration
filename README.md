@@ -9,10 +9,46 @@ Research slices on **model evaluation beyond accuracy**:
 5. **Slice E**: **per-row decisions under smooth and abrupt prior drift** -- online EM, sliding-window EM and CUSUM-restarted EM trackers, batch-latency and delayed-label baselines, dev-seed tuning, and Politis-White bootstrap block lengths.
 6. **Slice F**: **small prior jumps and the CUSUM drift size** -- a small-jump regime path, joint (threshold, delta) selection on dev seeds, alarm detection rate / delay / false alarms.
 7. **Slice G**: **multiclass calibration** -- top-label vs classwise ECE, temperature vs vector scaling on two datasets x three models, pre-registered. Temperature ships ON as the multiclass default; vector scaling stays OFF.
-8. **Slice H (this PR)**: **Dirichlet (matrix) scaling** with ODIR, pre-registered on fresh seeds, and slice G's call re-scored with a debiased estimator. Dirichlet stays OFF; temperature stays the default.
+8. **Slice H**: **Dirichlet (matrix) scaling** with ODIR, pre-registered on fresh seeds, and slice G's call re-scored with a debiased estimator. Dirichlet stays OFF; temperature stays the default.
+9. **Slice I (this PR)**: Dirichlet with a **wider ODIR lambda grid** (to 1e3), pre-registered on fresh seeds. Still OFF; temperature stays the default.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice I (2026-11-20): Dirichlet with a wider lambda grid, pre-registered; stays OFF
+
+Slice H's CV picked the top of its ODIR grid (lambda 1) in 38 of 60 fits, so the grid may have cut the Dirichlet map
+short. Slice I changes only that: `DirichletScaling.WIDE_LAMBDAS` = 1e-4 .. 1e3. The rule
+(`multiclass_i.PREREGISTERED`) is slice H's H3 bar, unchanged, and was committed before fresh seeds 30-39 were run.
+H5: Dirichlet replaces temperature iff it lowers classwise ECE on ≥ 7/10 seeds in ≥ 4 of 6 cells, with no cell losing
+more than 0.005 accuracy or gaining more than 0.01 NLL. The expectation, from slice H's dev-seed probe, was another
+fail. Run: `python scripts/run_slice_i.py` (~1.5 min).
+
+| dataset | model | classwise ECE temp / Dirichlet | Dirichlet ECE wins | NLL diff | accuracy diff | CV at lambda 1e3 |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| digits | logistic | 0.0041 / 0.0047 | 2/10 | +0.060 | -0.0011 | 8/10 |
+| digits | random_forest | 0.0040 / 0.0047 | 3/10 | +0.113 | -0.0044 | 5/10 |
+| digits | naive_bayes | 0.0319 / 0.0184 | 10/10 | +0.064 | +0.0398 | 3/10 |
+| synth5 | logistic | 0.0331 / 0.0335 | 3/10 | -0.001 | +0.0005 | 5/10 |
+| synth5 | random_forest | 0.0290 / 0.0288 | 7/10 | -0.000 | -0.0001 | 3/10 |
+| synth5 | naive_bayes | 0.0369 / 0.0334 | 9/10 | -0.023 | +0.0097 | 0/10 |
+
+**H5 fails, so the wide-grid Dirichlet stays OFF and temperature stays the default.** It wins 3 cells,
+not 4, and raises NLL in all three digits cells (+0.06 to +0.11). The expected fail came true, but not for the expected
+reason (logistic): the digits NLL broke it.
+
+### Post-hoc reading (decides nothing; `multiclass_i.posthoc_edge`)
+
+- The wider grid still hits its edge: CV chose 1e3 in 24 of 60 fits.
+- On digits, the NLL gap to temperature is +0.023 in the 16 fits at the
+  top, but +0.143 in the 14 fits where CV chose a more flexible
+  map. The loss comes from the 3-fold CV choice on the calibration rows picking too flexible a map, not from the
+  grid's range. A fixed large lambda, or selection on a held-out split, is the next thing to pre-register.
+
+### Weaknesses
+
+- Two datasets x three models, 10 seeds. The edge reading is a split of 30 digits fits by a chosen quantity, so it
+  is selection-dependent and only suggestive.
 
 ## Slice H hypothesis (pre-registered)
 
