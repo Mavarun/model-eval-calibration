@@ -82,3 +82,36 @@ def decide_h4(long_g: pd.DataFrame) -> dict:
     t = _cell_stats(sub, "none", "temperature")
     h1 = bool((t.ece_wins >= 7).sum() >= 4 and (t.nll_diff <= 0.01).all())
     return {"H1_debiased": h1, "temperature_vs_none_debiased": t.to_dict("records")}
+
+
+def posthoc_lambda_edge(grid: pd.DataFrame) -> dict:
+    """Post-hoc, decides nothing: how often CV picked the largest lambda on the grid (an edge solution)."""
+    d = grid[grid["map"] == "dirichlet"]
+    top = max(DirichletScaling.LAMBDAS)
+    per = d.groupby(["dataset", "model"]).lam.apply(lambda s: int((s == top).sum())).to_dict()
+    return {"n_fits": int(len(d)), "n_at_top": int((d.lam == top).sum()),
+            "per_cell_at_top": {f"{k[0]}/{k[1]}": v for k, v in per.items()}}
+
+
+def posthoc_wider_lambda(seeds: Iterable[int] = DEV_SEEDS, lams=(1.0, 10.0, 100.0)) -> pd.DataFrame:
+    """Post-hoc probe on the *dev* seeds only (never seeds 20-29): fixed larger lambdas vs temperature.
+
+    Decides nothing; it says whether a future pre-registration should widen the grid.
+    """
+    rows = []
+    for d_ in DATASETS:
+        for m_ in MODELS:
+            for s in seeds:
+                x, y = load(d_, s)
+                x_tr, y_tr, x_cal, y_cal, x_te, y_te = split(x, y, s)
+                mod = make_model(m_, s).fit(x_tr, y_tr)
+                p_cal, p_te = _renorm(mod.predict_proba(x_cal)), _renorm(mod.predict_proba(x_te))
+                t = MulticlassTemperature().fit(p_cal, y_cal).transform(p_te)
+                base = {"dataset": d_, "model": m_, "seed": s, "k": p_te.shape[1], "n_cal": len(y_cal)}
+                rows.append({**base, "map": "temperature", "nll": multiclass_nll(y_te, t),
+                             "classwise_ece": classwise_ece(y_te, t)})
+                for lam in lams:
+                    q = DirichletScaling(lam=lam).fit(p_cal, y_cal).transform(p_te)
+                    rows.append({**base, "map": f"dirichlet lam={lam:g}", "nll": multiclass_nll(y_te, q),
+                                 "classwise_ece": classwise_ece(y_te, q)})
+    return pd.DataFrame(rows)
