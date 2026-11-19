@@ -1,0 +1,67 @@
+{
+  "H5": {
+    "H5": false,
+    "recommended": "temperature",
+    "cells_ece_wins_ge7": 3,
+    "dirichlet_wide_vs_temperature": [
+      {
+        "dataset": "digits",
+        "model": "logistic",
+        "ece_wins": 2,
+        "ece_diff": 0.0006565344513417801,
+        "nll_diff": 0.05954642154808112,
+        "acc_diff": -0.0011111111111111183,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "random_forest",
+        "ece_wins": 3,
+        "ece_diff": 0.0007353072834018601,
+        "nll_diff": 0.11336316017525694,
+        "acc_diff": -0.004444444444444429,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.013519948234276467,
+        "nll_diff": 0.06358169515470145,
+        "acc_diff": 0.0398148148148148,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "logistic",
+        "ece_wins": 3,
+        "ece_diff": 0.0004002114487277202,
+        "nll_diff": -0.001299327810503592,
+        "acc_diff": 0.0004999999999999837,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "random_forest",
+        "ece_wins": 7,
+        "ece_diff": -0.0002683712546603108,
+        "nll_diff": -0.0003161449512139924,
+        "acc_diff": -0.00011111111111112848,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "naive_bayes",
+        "ece_wins": 9,
+        "ece_diff": -0.0035424585980304924,
+        "nll_diff": -0.023452789919146143,
+        "acc_diff": 0.009722222222222215,
+        "n_seeds": 10
+      }
+    ]
+  },
+  "preregistered": {
+    "H5_wide_dirichlet_over_temperature": "On fresh seeds 30-39, Dirichlet scaling with the wide grid replaces temperature as the recommended default iff, in >= 4 of the 6 (dataset, model) cells, it lowers test classwise ECE vs temperature on >= 7 of 10 seeds, AND in every cell its mean test accuracy is no more than 0.005 below temperature's and its mean NLL no more than 0.01 above (slice H's H3 bar, unchanged). Otherwise it stays OFF.",
+    "reported_not_decided": "Debiased classwise CE, the chosen lambdas and how often the new top (1e3) is chosen."
+  }
+}
