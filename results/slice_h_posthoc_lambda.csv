@@ -1,0 +1,25 @@
+dataset,model,map,nll,classwise_ece
+digits,logistic,temperature,0.1105,0.0036
+digits,logistic,dirichlet lam=1,0.1892,0.0044
+digits,logistic,dirichlet lam=10,0.1473,0.0043
+digits,logistic,dirichlet lam=100,0.1423,0.0042
+digits,random_forest,temperature,0.0889,0.0039
+digits,random_forest,dirichlet lam=1,0.1168,0.0041
+digits,random_forest,dirichlet lam=10,0.0891,0.0038
+digits,random_forest,dirichlet lam=100,0.0852,0.0035
+digits,naive_bayes,temperature,0.5743,0.0287
+digits,naive_bayes,dirichlet lam=1,0.6963,0.0152
+digits,naive_bayes,dirichlet lam=10,0.5484,0.0148
+digits,naive_bayes,dirichlet lam=100,0.5206,0.0158
+synth5,logistic,temperature,1.2267,0.0336
+synth5,logistic,dirichlet lam=1,1.2274,0.0332
+synth5,logistic,dirichlet lam=10,1.2258,0.0341
+synth5,logistic,dirichlet lam=100,1.2266,0.0341
+synth5,random_forest,temperature,0.8838,0.0269
+synth5,random_forest,dirichlet lam=1,0.8836,0.0287
+synth5,random_forest,dirichlet lam=10,0.8833,0.0279
+synth5,random_forest,dirichlet lam=100,0.8841,0.028
+synth5,naive_bayes,temperature,1.2247,0.0327
+synth5,naive_bayes,dirichlet lam=1,1.2031,0.0298
+synth5,naive_bayes,dirichlet lam=10,1.2091,0.0305
+synth5,naive_bayes,dirichlet lam=100,1.2185,0.0308

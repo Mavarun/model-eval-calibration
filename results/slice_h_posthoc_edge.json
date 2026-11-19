@@ -1,0 +1,12 @@
+{
+  "n_fits": 60,
+  "n_at_top": 38,
+  "per_cell_at_top": {
+    "digits/logistic": 6,
+    "digits/naive_bayes": 8,
+    "digits/random_forest": 7,
+    "synth5/logistic": 5,
+    "synth5/naive_bayes": 3,
+    "synth5/random_forest": 9
+  }
+}
