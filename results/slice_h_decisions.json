@@ -1,0 +1,126 @@
+{
+  "H3": {
+    "H3": false,
+    "recommended": "temperature",
+    "dirichlet_vs_temperature": [
+      {
+        "dataset": "digits",
+        "model": "logistic",
+        "ece_wins": 1,
+        "ece_diff": 0.0020290974460752424,
+        "nll_diff": 0.3455475135008804,
+        "acc_diff": -0.014629629629629649,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "random_forest",
+        "ece_wins": 3,
+        "ece_diff": 0.0006497871469962362,
+        "nll_diff": 0.12749095970684918,
+        "acc_diff": -0.008333333333333349,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.014476464636808285,
+        "nll_diff": 0.18536514627539025,
+        "acc_diff": 0.04444444444444442,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "logistic",
+        "ece_wins": 4,
+        "ece_diff": 6.195609966871442e-05,
+        "nll_diff": -0.005206466431718492,
+        "acc_diff": 0.003277777777777774,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "random_forest",
+        "ece_wins": 7,
+        "ece_diff": -0.000886822563960362,
+        "nll_diff": 0.0030491068048158487,
+        "acc_diff": -0.0006111111111111068,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "naive_bayes",
+        "ece_wins": 9,
+        "ece_diff": -0.004988342752039485,
+        "nll_diff": -0.025951227513766127,
+        "acc_diff": 0.013444444444444459,
+        "n_seeds": 10
+      }
+    ]
+  },
+  "H4": {
+    "H1_debiased": true,
+    "temperature_vs_none_debiased": [
+      {
+        "dataset": "digits",
+        "model": "logistic",
+        "ece_wins": 0,
+        "ece_diff": 0.0,
+        "nll_diff": -0.0040039551050345176,
+        "acc_diff": 0.0,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "random_forest",
+        "ece_wins": 10,
+        "ece_diff": -0.06479246352620878,
+        "nll_diff": -0.2728762639176672,
+        "acc_diff": 0.0,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.022261487483867786,
+        "nll_diff": -1.967213673780107,
+        "acc_diff": 0.0,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "logistic",
+        "ece_wins": 4,
+        "ece_diff": 0.0013377794045653674,
+        "nll_diff": 0.00044359704349350437,
+        "acc_diff": 0.0,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "random_forest",
+        "ece_wins": 10,
+        "ece_diff": -0.07060304064413776,
+        "nll_diff": -0.08354915842217123,
+        "acc_diff": 0.0,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.03558525815668336,
+        "nll_diff": -0.1158048534511195,
+        "acc_diff": 0.0,
+        "n_seeds": 10
+      }
+    ]
+  },
+  "preregistered": {
+    "H3_dirichlet_over_temperature": "On fresh seeds 20-29, Dirichlet scaling replaces temperature as the recommended default iff, in >= 4 of the 6 (dataset, model) cells, it lowers test classwise ECE vs temperature on >= 7 of 10 seeds, AND in every cell its mean test accuracy is no more than 0.005 below temperature's and its mean NLL no more than 0.01 above. Otherwise OFF (same bar as slice G's H2).",
+    "H4_h1_under_debiased_estimator": "Slice G's H1 (temperature vs none) is re-scored on the same seeds 0-9 with classwise_ce_debiased in place of binned classwise ECE. These seeds are already seen, so this cannot change the default: if H1 fails under the debiased estimator, the README states that the slice G call depends on the estimator.",
+    "reported_not_decided": "Debiased CE for H3, top-label ECE, Brier and the chosen ODIR lambdas are context only."
+  }
+}
