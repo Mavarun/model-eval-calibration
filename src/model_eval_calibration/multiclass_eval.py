@@ -130,3 +130,21 @@ def decide(long: pd.DataFrame) -> dict:
     default = ("vector" if h2 else "temperature") if h1 else "none"
     return {"H1": h1, "H2": h2, "recommended": default,
             "temperature_vs_none": t.to_dict("records"), "vector_vs_temperature": v.to_dict("records")}
+
+
+def posthoc_saturation(seeds: Iterable[int] = EVAL_SEEDS, datasets=DATASETS, models=MODELS,
+                       cut: float = 0.999) -> pd.DataFrame:
+    """Post-hoc reading that decides nothing: share of test rows whose base max probability exceeds ``cut``.
+
+    A base model that outputs near-0/1 vectors leaves a single temperature little to work with:
+    softening the top class also spreads mass evenly over the K - 1 others.
+    """
+    rows = []
+    for d in datasets:
+        for m in models:
+            for s in seeds:
+                x, y = load(d, s)
+                x_tr, y_tr, _, _, x_te, _ = split(x, y, s)
+                p = _renorm(make_model(m, s).fit(x_tr, y_tr).predict_proba(x_te))
+                rows.append({"seed": s, "dataset": d, "model": m, "share_saturated": float((p.max(axis=1) > cut).mean())})
+    return pd.DataFrame(rows)
