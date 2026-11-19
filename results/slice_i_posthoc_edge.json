@@ -1,0 +1,15 @@
+{
+  "n_fits": 60,
+  "n_at_top": 24,
+  "per_cell_at_top": {
+    "digits/logistic": 8,
+    "digits/naive_bayes": 3,
+    "digits/random_forest": 5,
+    "synth5/logistic": 5,
+    "synth5/naive_bayes": 0,
+    "synth5/random_forest": 3
+  },
+  "digits_nll_gap_at_top": 0.0228190625,
+  "digits_nll_gap_below_top": 0.14284335714285712,
+  "digits_n_at_top": 16
+}

@@ -63,3 +63,19 @@ def decide_h5(long: pd.DataFrame) -> dict:
     h5 = bool((v.ece_wins >= 7).sum() >= 4 and (v.acc_diff >= -0.005).all() and (v.nll_diff <= 0.01).all())
     return {"H5": h5, "recommended": "dirichlet_wide" if h5 else "temperature",
             "cells_ece_wins_ge7": int((v.ece_wins >= 7).sum()), "dirichlet_wide_vs_temperature": v.to_dict("records")}
+
+
+def posthoc_edge(grid: pd.DataFrame) -> dict:
+    """Post-hoc, decides nothing: how often CV chose the new top lambda (1e3), and the Dirichlet - temperature
+    NLL gap on digits split by whether the top was chosen (is the loss an edge effect or not?)."""
+    top = max(DirichletScaling.WIDE_LAMBDAS)
+    d = grid[grid["map"] == "dirichlet_wide"].set_index(["dataset", "model", "seed"])
+    t = grid[grid["map"] == "temperature"].set_index(["dataset", "model", "seed"])
+    gap = (d.nll - t.nll).rename("nll_gap").to_frame().join(d.lam)
+    dig = gap.loc["digits"]
+    return {"n_fits": int(len(d)), "n_at_top": int((d.lam == top).sum()),
+            "per_cell_at_top": {f"{k[0]}/{k[1]}": int(v) for k, v in
+                                d.groupby(["dataset", "model"]).lam.apply(lambda s: (s == top).sum()).items()},
+            "digits_nll_gap_at_top": float(dig[dig.lam == top].nll_gap.mean()),
+            "digits_nll_gap_below_top": float(dig[dig.lam < top].nll_gap.mean()),
+            "digits_n_at_top": int((dig.lam == top).sum())}
