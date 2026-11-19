@@ -1,0 +1,117 @@
+{
+  "H1": true,
+  "H2": false,
+  "recommended": "temperature",
+  "temperature_vs_none": [
+    {
+      "dataset": "digits",
+      "model": "logistic",
+      "ece_wins": 10,
+      "ece_diff": -0.0006378667278126124,
+      "nll_diff": -0.0040039551050345176,
+      "acc_diff": 0.0,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "digits",
+      "model": "random_forest",
+      "ece_wins": 10,
+      "ece_diff": -0.03688011395233858,
+      "nll_diff": -0.2728762639176672,
+      "acc_diff": 0.0,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "digits",
+      "model": "naive_bayes",
+      "ece_wins": 3,
+      "ece_diff": 0.0014968903544501603,
+      "nll_diff": -1.967213673780107,
+      "acc_diff": 0.0,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "synth5",
+      "model": "logistic",
+      "ece_wins": 4,
+      "ece_diff": 0.0008341660628266624,
+      "nll_diff": 0.00044359704349350437,
+      "acc_diff": 0.0,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "synth5",
+      "model": "random_forest",
+      "ece_wins": 10,
+      "ece_diff": -0.05020995940069599,
+      "nll_diff": -0.08354915842217123,
+      "acc_diff": 0.0,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "synth5",
+      "model": "naive_bayes",
+      "ece_wins": 10,
+      "ece_diff": -0.021841744954279162,
+      "nll_diff": -0.1158048534511195,
+      "acc_diff": 0.0,
+      "n_seeds": 10
+    }
+  ],
+  "vector_vs_temperature": [
+    {
+      "dataset": "digits",
+      "model": "logistic",
+      "ece_wins": 4,
+      "ece_diff": 0.0006889865156887041,
+      "nll_diff": 0.008315904520837011,
+      "acc_diff": 0.0,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "digits",
+      "model": "random_forest",
+      "ece_wins": 0,
+      "ece_diff": 0.0014764394289909384,
+      "nll_diff": 0.0067525066487250165,
+      "acc_diff": 0.0009259259259259079,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "digits",
+      "model": "naive_bayes",
+      "ece_wins": 10,
+      "ece_diff": -0.009922451167669304,
+      "nll_diff": -0.022409050417885455,
+      "acc_diff": 0.030185185185185183,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "synth5",
+      "model": "logistic",
+      "ece_wins": 4,
+      "ece_diff": 0.0006802461859394774,
+      "nll_diff": -0.0002518440408141087,
+      "acc_diff": 0.0011111111111111072,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "synth5",
+      "model": "random_forest",
+      "ece_wins": 2,
+      "ece_diff": 0.0003822466333729551,
+      "nll_diff": 0.0004901199303473213,
+      "acc_diff": 5.5555555555586444e-05,
+      "n_seeds": 10
+    },
+    {
+      "dataset": "synth5",
+      "model": "naive_bayes",
+      "ece_wins": 8,
+      "ece_diff": -0.003335870600413908,
+      "nll_diff": -0.008051489908429965,
+      "acc_diff": 0.005500000000000005,
+      "n_seeds": 10
+    }
+  ]
+}
