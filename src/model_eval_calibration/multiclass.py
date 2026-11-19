@@ -146,3 +146,30 @@ class VectorScaling:
         if self.w_ is None:
             raise RuntimeError("fit first")
         return np.exp(log_softmax(_logp(p) * self.w_ + self.b_, axis=1))
+
+
+# Slice G, pre-registered H1 passed and H2 failed (results/slice_g_decisions.json): temperature
+# lowered test classwise ECE on 10/10 seeds in 4 of 6 (dataset, model) cells without raising NLL
+# by more than 0.01 anywhere; vector scaling beat it in only 2 cells (both naive Bayes).
+RECOMMENDED_MULTICLASS_MAP = "temperature"
+
+
+def fit_multiclass_map(p_cal, y_cal, method: str = RECOMMENDED_MULTICLASS_MAP):
+    """Fit a post-hoc multiclass map on calibration rows; ``method`` in {'temperature', 'vector', 'none'}.
+
+    The default is the slice-G recommendation. ``'none'`` returns an object whose ``transform`` is
+    the identity, so callers can switch calibration off without branching.
+    """
+    if method == "temperature":
+        return MulticlassTemperature().fit(p_cal, y_cal)
+    if method == "vector":
+        return VectorScaling().fit(p_cal, y_cal)
+    if method == "none":
+        _check(y_cal, p_cal)
+        return _Identity()
+    raise ValueError("method must be 'temperature', 'vector' or 'none'")
+
+
+class _Identity:
+    def transform(self, p) -> np.ndarray:
+        return np.asarray(p, dtype=float)
