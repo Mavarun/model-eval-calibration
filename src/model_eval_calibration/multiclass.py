@@ -191,14 +191,23 @@ class DirichletScaling:
     with a large ``lam`` the map degrades to vector scaling without the bias, not to the identity.
     ``lam=None`` picks it from ``lambdas`` (default :attr:`LAMBDAS`; slice I tests
     :attr:`WIDE_LAMBDAS`) by 3-fold stratified CV NLL on the calibration rows only (ties go to
-    the larger, simpler value).
+    the larger, simpler value). ``select="holdout"`` (slice J) instead scores each candidate on one
+    stratified 30% holdout of the calibration rows, fitted on the other 70%; the chosen value is then
+    refitted on all calibration rows either way.
     """
 
     LAMBDAS = (1e-4, 1e-3, 1e-2, 1e-1, 1.0)
     # Slice I: slice H's CV picked the top of LAMBDAS in 38 of 60 fits (an edge solution).
     WIDE_LAMBDAS = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0)
 
-    def __init__(self, lam: float | None = None, seed: int = 0, lambdas: tuple[float, ...] | None = None) -> None:
+    SELECTORS = ("cv", "holdout")
+    HOLDOUT_FRAC = 0.3
+
+    def __init__(self, lam: float | None = None, seed: int = 0, lambdas: tuple[float, ...] | None = None,
+                 select: str = "cv") -> None:
+        if select not in self.SELECTORS:
+            raise ValueError(f"select must be one of {self.SELECTORS}")
+        self.select = select
         if lam is not None and lam < 0:
             raise ValueError("lam must be >= 0")
         if lambdas is not None and (len(lambdas) == 0 or min(lambdas) < 0):
@@ -235,9 +244,12 @@ class DirichletScaling:
         z = _logp(p)
         lam = self.lam
         if lam is None:
-            from sklearn.model_selection import StratifiedKFold
+            from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
-            folds = list(StratifiedKFold(3, shuffle=True, random_state=self.seed).split(z, y))
+            if self.select == "holdout":
+                folds = list(StratifiedShuffleSplit(1, test_size=self.HOLDOUT_FRAC, random_state=self.seed).split(z, y))
+            else:
+                folds = list(StratifiedKFold(3, shuffle=True, random_state=self.seed).split(z, y))
             scores = []
             for cand in self.lambdas:
                 nll = 0.0
@@ -245,7 +257,7 @@ class DirichletScaling:
                     w, b = self._fit(z[tr], y[tr], cand)
                     ls = log_softmax(z[va] @ w.T + b, axis=1)
                     nll -= ls[np.arange(va.size), y[va]].sum()
-                scores.append(nll / y.size)
+                scores.append(nll / sum(va.size for _, va in folds))
             best = min(scores)
             lam = max(c for c, s in zip(self.lambdas, scores) if s <= best + 1e-9)
         self.lam_ = float(lam)
