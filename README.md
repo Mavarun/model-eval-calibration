@@ -10,10 +10,47 @@ Research slices on **model evaluation beyond accuracy**:
 6. **Slice F**: **small prior jumps and the CUSUM drift size** -- a small-jump regime path, joint (threshold, delta) selection on dev seeds, alarm detection rate / delay / false alarms.
 7. **Slice G**: **multiclass calibration** -- top-label vs classwise ECE, temperature vs vector scaling on two datasets x three models, pre-registered. Temperature ships ON as the multiclass default; vector scaling stays OFF.
 8. **Slice H**: **Dirichlet (matrix) scaling** with ODIR, pre-registered on fresh seeds, and slice G's call re-scored with a debiased estimator. Dirichlet stays OFF; temperature stays the default.
-9. **Slice I (this PR)**: Dirichlet with a **wider ODIR lambda grid** (to 1e3), pre-registered on fresh seeds. Still OFF; temperature stays the default.
+9. **Slice I**: Dirichlet with a **wider ODIR lambda grid** (to 1e3), pre-registered on fresh seeds. Still OFF; temperature stays the default.
+10. **Slice J (this PR)**: Dirichlet with a **fixed lambda (100)** or lambda chosen on a **30% holdout**, pre-registered on fresh seeds. Both OFF; temperature stays the default.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice J (2026-11-24): Dirichlet with a fixed lambda, or lambda chosen on a holdout; both stay OFF
+
+Slice I's post-hoc reading blamed the digits NLL loss on the 3-fold CV choice picking too flexible a map, and named
+"a fixed large lambda, or selection on a held-out split" as the next thing to pre-register. Slice J tests both against
+temperature with slice H's bar unchanged (`multiclass_j.PREREGISTERED`, committed before fresh seeds 40-49 ran):
+**H6** Dirichlet with lambda fixed at 100 (`DirichletScaling(lam=100)`; 100 beat 1000 on NLL in all six cells of a
+dev probe on seeds 100-102), and **H7** the wide grid with lambda chosen on one stratified 30% holdout of the
+calibration rows (`select="holdout"`, new). Each replaces temperature iff it lowers classwise ECE on ≥ 7/10 seeds in
+≥ 4 of 6 cells, with no cell losing more than 0.005 accuracy or gaining more than 0.01 NLL. Expectation: both fail on
+digits logistic NLL. Run: `python scripts/run_slice_j.py` (~1 min).
+
+| dataset | model | classwise ECE temp / fixed / holdout | ECE wins fixed / holdout | NLL diff fixed / holdout | accuracy diff fixed / holdout |
+| --- | --- | --- | --- | --- | --- |
+| digits | logistic | 0.0038 / 0.0039 / 0.0040 | 3/10 / 3/10 | +0.030 / +0.028 | +0.0019 / +0.0017 |
+| digits | random_forest | 0.0036 / 0.0042 / 0.0042 | 3/10 / 3/10 | +0.030 / +0.030 | -0.0020 / -0.0020 |
+| digits | naive_bayes | 0.0303 / 0.0165 / 0.0165 | 10/10 / 10/10 | -0.079 / -0.043 | +0.0422 / +0.0402 |
+| synth5 | logistic | 0.0349 / 0.0346 / 0.0337 | 6/10 / 8/10 | +0.000 / -0.005 | -0.0014 / +0.0028 |
+| synth5 | random_forest | 0.0315 / 0.0315 / 0.0306 | 5/10 / 6/10 | -0.000 / +0.004 | +0.0007 / -0.0012 |
+| synth5 | naive_bayes | 0.0376 / 0.0373 / 0.0343 | 5/10 / 8/10 | -0.004 / -0.019 | -0.0005 / +0.0091 |
+
+**H6 and H7 both fail, so Dirichlet stays OFF and temperature stays the default.** The fixed map wins on ECE in 1
+cell and the holdout choice in 3, not 4, and both raise NLL on digits logistic and random forest by about +0.03.
+The expectation held.
+
+Reading (from the table; decides nothing):
+
+- **Slice I's explanation was incomplete.** Even the stiff fixed map (lambda 100) loses +0.030 NLL on digits logistic,
+  and the holdout arm chose lambda >= 100 in 26 of its 30 digits fits. Choosing too flexible a map is not the
+  whole digits NLL loss; a full k x k map on 10 classes fitted to the calibration rows costs NLL on its own.
+- Where temperature is weakest (naive Bayes, which is badly miscalibrated), both Dirichlet arms win on every seed
+  and lift digits accuracy by about 4 points, as in slices H and I. That is a per-model case, not a default.
+
+### Weaknesses
+
+- Two datasets x three models, 10 seeds; one fixed lambda chosen on three dev seeds; one 30% holdout split.
 
 ## Slice I (2026-11-20): Dirichlet with a wider lambda grid, pre-registered; stays OFF
 
@@ -624,6 +661,7 @@ src/model_eval_calibration/
   data.py           # breast_cancer + hard make_classification loaders
   multiclass.py     # slice G: top-label / classwise ECE, multiclass Brier / NLL, temperature + vector scaling, default map
   multiclass_eval.py # slice G harness: digits / synth5 x 3 models, pre-registered H1/H2, saturation post-hoc
+  multiclass_j.py   # slice J protocol: fixed-lambda and holdout-lambda Dirichlet vs temperature
 scripts/run_calibration_slice.py
 scripts/run_nested_calibration_slice.py
 scripts/run_shift_conformal_slice.py
@@ -631,6 +669,7 @@ scripts/run_label_shift_slice.py
 scripts/run_drift_stream_slice.py
 scripts/run_small_jump_slice.py
 scripts/run_multiclass_slice.py
+scripts/run_slice_j.py
 results/                      # slice G grid, decisions, report, saturation (committed)
 .github/workflows/tests.yml   # pytest on push / PR (py3.11, py3.12)
 tests/
@@ -638,7 +677,7 @@ tests/
 
 ## Next slices (not done)
 
-- Dirichlet scaling with a wider pre-registered lambda grid (slice H's CV sat at the grid edge), and multiclass calibration under shift
+- Multiclass calibration under shift (Dirichlet with a wider grid, a fixed lambda and a holdout choice are done in slices I-J; all OFF)
 - Temperature scaling for neural nets (binary temperature is done in slice C; multiclass logits are not)
 - Real-data shift benchmarks (e.g. time-split public tabular sets) for the slice C / D methods
 - Mixed label + covariate shift; multiclass BBSE / EM with a regularised confusion matrix
