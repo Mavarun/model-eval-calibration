@@ -1,0 +1,246 @@
+{
+  "H6": {
+    "pass": false,
+    "cells_ece_wins_ge7": 1,
+    "cells": [
+      {
+        "dataset": "digits",
+        "model": "logistic",
+        "ece_wins": 3,
+        "ece_diff": 0.00012873741581750456,
+        "nll_diff": 0.029735761744229573,
+        "acc_diff": 0.002037037037037048,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "random_forest",
+        "ece_wins": 3,
+        "ece_diff": 0.000511963197952407,
+        "nll_diff": 0.030284834549212287,
+        "acc_diff": -0.0022222222222222253,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.013845374758640939,
+        "nll_diff": -0.07468008618666788,
+        "acc_diff": 0.04222222222222223,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "logistic",
+        "ece_wins": 6,
+        "ece_diff": -0.00027973930936874176,
+        "nll_diff": 0.00015582719530125023,
+        "acc_diff": -0.0013333333333333031,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "random_forest",
+        "ece_wins": 4,
+        "ece_diff": -5.1189375949042826e-05,
+        "nll_diff": -4.6118559014718394e-05,
+        "acc_diff": 0.000722222222222213,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "naive_bayes",
+        "ece_wins": 5,
+        "ece_diff": -0.00025762671057005213,
+        "nll_diff": -0.004215951892522418,
+        "acc_diff": -0.0004999999999999837,
+        "n_seeds": 10
+      }
+    ]
+  },
+  "H7": {
+    "pass": false,
+    "cells_ece_wins_ge7": 3,
+    "cells": [
+      {
+        "dataset": "digits",
+        "model": "logistic",
+        "ece_wins": 3,
+        "ece_diff": 0.00027261632579275095,
+        "nll_diff": 0.030146619889183674,
+        "acc_diff": 0.000740740740740753,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "random_forest",
+        "ece_wins": 3,
+        "ece_diff": 0.0005383907646993273,
+        "nll_diff": 0.03191533029840525,
+        "acc_diff": -0.002037037037037048,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.013673096679530799,
+        "nll_diff": 0.012940367032279753,
+        "acc_diff": 0.03962962962962961,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "logistic",
+        "ece_wins": 7,
+        "ece_diff": -0.0011616145858539474,
+        "nll_diff": -0.004828617255983181,
+        "acc_diff": 0.0026111111111111252,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "random_forest",
+        "ece_wins": 6,
+        "ece_diff": -0.0009655759577699645,
+        "nll_diff": 0.003982835680060903,
+        "acc_diff": -0.0011666666666666713,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "naive_bayes",
+        "ece_wins": 8,
+        "ece_diff": -0.0033013892875386293,
+        "nll_diff": -0.018649406216938603,
+        "acc_diff": 0.009055555555555577,
+        "n_seeds": 10
+      }
+    ]
+  },
+  "recommended": "temperature",
+  "read": {
+    "K1": true,
+    "H6_pass": false,
+    "H7_pass": false,
+    "H6_cells": 1,
+    "H7_cells": 3,
+    "recommended": "temperature"
+  },
+  "vs_slice_j": [
+    {
+      "hyp": "H6",
+      "dataset": "digits",
+      "model": "logistic",
+      "nll_diff_j": 0.02969602282358259,
+      "nll_diff_k": 0.029735761744229573,
+      "ece_wins_j": 3,
+      "ece_wins_k": 3
+    },
+    {
+      "hyp": "H6",
+      "dataset": "digits",
+      "model": "random_forest",
+      "nll_diff_j": 0.030321629489179512,
+      "nll_diff_k": 0.030284834549212287,
+      "ece_wins_j": 3,
+      "ece_wins_k": 3
+    },
+    {
+      "hyp": "H6",
+      "dataset": "digits",
+      "model": "naive_bayes",
+      "nll_diff_j": -0.07930803931164951,
+      "nll_diff_k": -0.07468008618666788,
+      "ece_wins_j": 10,
+      "ece_wins_k": 10
+    },
+    {
+      "hyp": "H6",
+      "dataset": "synth5",
+      "model": "logistic",
+      "nll_diff_j": 0.0001559159130847032,
+      "nll_diff_k": 0.00015582719530125023,
+      "ece_wins_j": 6,
+      "ece_wins_k": 6
+    },
+    {
+      "hyp": "H6",
+      "dataset": "synth5",
+      "model": "random_forest",
+      "nll_diff_j": -4.707009304295573e-05,
+      "nll_diff_k": -4.6118559014718394e-05,
+      "ece_wins_j": 5,
+      "ece_wins_k": 4
+    },
+    {
+      "hyp": "H6",
+      "dataset": "synth5",
+      "model": "naive_bayes",
+      "nll_diff_j": -0.004215466006391599,
+      "nll_diff_k": -0.004215951892522418,
+      "ece_wins_j": 5,
+      "ece_wins_k": 5
+    },
+    {
+      "hyp": "H7",
+      "dataset": "digits",
+      "model": "logistic",
+      "nll_diff_j": 0.028400484412022663,
+      "nll_diff_k": 0.030146619889183674,
+      "ece_wins_j": 3,
+      "ece_wins_k": 3
+    },
+    {
+      "hyp": "H7",
+      "dataset": "digits",
+      "model": "random_forest",
+      "nll_diff_j": 0.030402249254247976,
+      "nll_diff_k": 0.03191533029840525,
+      "ece_wins_j": 3,
+      "ece_wins_k": 3
+    },
+    {
+      "hyp": "H7",
+      "dataset": "digits",
+      "model": "naive_bayes",
+      "nll_diff_j": -0.042547404584608525,
+      "nll_diff_k": 0.012940367032279753,
+      "ece_wins_j": 10,
+      "ece_wins_k": 10
+    },
+    {
+      "hyp": "H7",
+      "dataset": "synth5",
+      "model": "logistic",
+      "nll_diff_j": -0.0048320133066437785,
+      "nll_diff_k": -0.004828617255983181,
+      "ece_wins_j": 8,
+      "ece_wins_k": 7
+    },
+    {
+      "hyp": "H7",
+      "dataset": "synth5",
+      "model": "random_forest",
+      "nll_diff_j": 0.003989376203272732,
+      "nll_diff_k": 0.003982835680060903,
+      "ece_wins_j": 6,
+      "ece_wins_k": 6
+    },
+    {
+      "hyp": "H7",
+      "dataset": "synth5",
+      "model": "naive_bayes",
+      "nll_diff_j": -0.018650089506755795,
+      "nll_diff_k": -0.018649406216938603,
+      "ece_wins_j": 8,
+      "ece_wins_k": 8
+    }
+  ],
+  "preregistered": {
+    "K1_verdicts_hold": "Slice J's H6 and H7 both still fail when both Dirichlet arms are fitted with converge=True.",
+    "K2_reported": "Per (dataset, model) cell: mean test NLL and ECE-winning seeds, converged minus slice J.",
+    "expectation": "K1 holds; converged fits lose a little more NLL on digits."
+  }
+}
