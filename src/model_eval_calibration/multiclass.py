@@ -194,6 +194,8 @@ class DirichletScaling:
     the larger, simpler value). ``select="holdout"`` (slice J) instead scores each candidate on one
     stratified 30% holdout of the calibration rows, fitted on the other 70%; the chosen value is then
     refitted on all calibration rows either way.
+    ``converge=True`` (slice K) runs L-BFGS-B to ftol 1e-15 / gtol 1e-10 instead of its default stop,
+    which lands at a platform-dependent point short of the optimum (slice J weaknesses).
     """
 
     LAMBDAS = (1e-4, 1e-3, 1e-2, 1e-1, 1.0)
@@ -201,10 +203,12 @@ class DirichletScaling:
     WIDE_LAMBDAS = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0, 1000.0)
 
     SELECTORS = ("cv", "holdout")
+    TIGHT = {"maxiter": 20000, "ftol": 1e-15, "gtol": 1e-10}
     HOLDOUT_FRAC = 0.3
 
     def __init__(self, lam: float | None = None, seed: int = 0, lambdas: tuple[float, ...] | None = None,
-                 select: str = "cv") -> None:
+                 select: str = "cv", converge: bool = False) -> None:
+        self.converge = bool(converge)
         if select not in self.SELECTORS:
             raise ValueError(f"select must be one of {self.SELECTORS}")
         self.select = select
@@ -219,8 +223,7 @@ class DirichletScaling:
         self.W_: np.ndarray | None = None
         self.b_: np.ndarray | None = None
 
-    @staticmethod
-    def _fit(z, y, lam):
+    def _fit(self, z, y, lam):
         n, k = z.shape
         onehot = np.eye(k)[y]
         off = 1.0 - np.eye(k)
@@ -236,7 +239,7 @@ class DirichletScaling:
             return nll, np.concatenate([gw.ravel(), gb])
 
         r = minimize(f, x0=np.concatenate([np.eye(k).ravel(), np.zeros(k)]), jac=True, method="L-BFGS-B",
-                     options={"maxiter": 2000})
+                     options=self.TIGHT if self.converge else {"maxiter": 2000})
         return r.x[: k * k].reshape(k, k), r.x[k * k:]
 
     def fit(self, p, y):

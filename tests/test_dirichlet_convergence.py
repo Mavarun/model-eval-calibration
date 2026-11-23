@@ -34,3 +34,19 @@ def test_converged_digits_fit_is_reproducible_and_the_default_stop_is_not(monkey
     assert abs(te_tight - 0.15659) < 2e-4
     assert abs(te_tight - te_default) < 0.012
     assert not np.allclose(default.W_, tight.W_, atol=1e-3)
+
+
+def test_converge_option_matches_the_patched_tight_fit(monkeypatch):
+    x, y = load("digits", 100)
+    x_tr, y_tr, x_cal, y_cal, x_te, y_te = split(x, y, 100)
+    m = make_model("logistic", 100).fit(x_tr, y_tr)
+    pc, pt = _renorm(m.predict_proba(x_cal)), _renorm(m.predict_proba(x_te))
+    opt = DirichletScaling(lam=100.0, converge=True).fit(pc, y_cal)
+    assert abs(multiclass_nll(y_te, opt.transform(pt)) - 0.15659) < 2e-4
+    monkeypatch.setattr(M, "minimize", _tight)
+    patched = DirichletScaling(lam=100.0).fit(pc, y_cal)
+    assert np.allclose(opt.W_, patched.W_, atol=1e-8)
+
+
+def test_converge_defaults_off():
+    assert DirichletScaling().converge is False
