@@ -35,4 +35,4 @@ def test_posthoc_prose():
 
 
 def test_overview_lists_slice_i():
-    assert "9. **Slice I (this PR)**" in README and "8. **Slice H**:" in README
+    assert "9. **Slice I**:" in README and "8. **Slice H**:" in README
