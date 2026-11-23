@@ -11,10 +11,53 @@ Research slices on **model evaluation beyond accuracy**:
 7. **Slice G**: **multiclass calibration** -- top-label vs classwise ECE, temperature vs vector scaling on two datasets x three models, pre-registered. Temperature ships ON as the multiclass default; vector scaling stays OFF.
 8. **Slice H**: **Dirichlet (matrix) scaling** with ODIR, pre-registered on fresh seeds, and slice G's call re-scored with a debiased estimator. Dirichlet stays OFF; temperature stays the default.
 9. **Slice I**: Dirichlet with a **wider ODIR lambda grid** (to 1e3), pre-registered on fresh seeds. Still OFF; temperature stays the default.
-10. **Slice J (this PR)**: Dirichlet with a **fixed lambda (100)** or lambda chosen on a **30% holdout**, pre-registered on fresh seeds. Both OFF; temperature stays the default.
+10. **Slice J**: Dirichlet with a **fixed lambda (100)** or lambda chosen on a **30% holdout**, pre-registered on fresh seeds. Both OFF; temperature stays the default.
+11. **Slice K (this PR)**: slice J **re-scored with converged Dirichlet fits** (`converge=True`). Verdicts hold; the default stop was acting as early stopping for flexible maps.
 
 Public / synthetic data only. Methodology demos -- **not** production accuracy claims.
 
+
+## Slice K (2026-11-24): slice J re-scored with converged fits; the verdicts hold, and the default stop was early stopping
+
+Slice J's weaknesses left open whether its OFF decisions would survive a fully converged ODIR fit. `DirichletScaling(converge=True)`
+(new) runs L-BFGS-B to ftol 1e-15 / gtol 1e-10. Slice K re-runs slice J's grid on the same seeds (40-49), with both
+Dirichlet arms converged and slice J's bar unchanged (`multiclass_k.PREREGISTERED`, committed before the re-run).
+**K1:** H6 and H7 both still fail. It re-reads a decision already made on these seeds, so a flip would have reopened
+slice J, not shipped anything. Expectation: K1 holds, and digits NLL gets a little worse. Run:
+`python scripts/run_slice_k.py` (~4 min on 8 cores).
+
+| hyp | dataset | model | NLL diff vs temperature, J / K | ECE wins, J / K |
+| --- | --- | --- | --- | --- |
+| H6 | digits | logistic | +0.030 / +0.030 | 3/10 / 3/10 |
+| H6 | digits | random_forest | +0.030 / +0.030 | 3/10 / 3/10 |
+| H6 | digits | naive_bayes | -0.079 / -0.075 | 10/10 / 10/10 |
+| H6 | synth5 | logistic | +0.000 / +0.000 | 6/10 / 6/10 |
+| H6 | synth5 | random_forest | -0.000 / -0.000 | 5/10 / 4/10 |
+| H6 | synth5 | naive_bayes | -0.004 / -0.004 | 5/10 / 5/10 |
+| H7 | digits | logistic | +0.028 / +0.030 | 3/10 / 3/10 |
+| H7 | digits | random_forest | +0.030 / +0.032 | 3/10 / 3/10 |
+| H7 | digits | naive_bayes | -0.043 / +0.013 | 10/10 / 10/10 |
+| H7 | synth5 | logistic | -0.005 / -0.005 | 8/10 / 7/10 |
+| H7 | synth5 | random_forest | +0.004 / +0.004 | 6/10 / 6/10 |
+| H7 | synth5 | naive_bayes | -0.019 / -0.019 | 8/10 / 8/10 |
+
+**K1 holds:** H6 still wins ECE in 1 of 6 cells and H7 in 3, so temperature stays the default. Temperature rows are
+identical to slice J.
+
+- **Most cells barely move.** The fixed lambda-100 map was already near its optimum: its digits logistic NLL gap is
+  +0.030 in both.
+- **The digits naive Bayes holdout cell flips sign on NLL** (-0.043 → +0.013 vs temperature). Converged low-lambda fits
+  are more flexible and overfit the calibration rows. The holdout picks a smaller lambda on seeds 43 (1 → 0.1) and 45
+  (0.1 → 0.001), and their test NLL rises by 0.21 and 0.30. The default stop had been acting as early stopping
+  there, and the "Dirichlet wins on naive Bayes" reading from slices H-J holds for ECE (10/10 both) but no longer
+  for NLL in the holdout arm.
+- The expectation held on K1. "Digits NLL gets a little worse" was true only for the holdout arm.
+
+### Weaknesses
+
+- Same seeds as slice J, so this checks a decision rather than testing anything new. Slices H and I were not
+  re-scored.
+- One tolerance; an explicit early-stopping or a lambda floor for the holdout arm is not tested.
 
 ## Slice J (2026-11-24): Dirichlet with a fixed lambda, or lambda chosen on a holdout; both stay OFF
 
@@ -58,7 +101,7 @@ Reading (from the table; decides nothing):
   the platform: on digits logistic seed 100 it gives test NLL 0.149 locally and 0.159 on the CI 3.11 runner, while the
   converged fit gives 0.157 on both (`tests/test_dirichlet_convergence.py`). So the direction of the change on
   converging is not stable, and whether any OFF decision in H-J would flip is unknown until they are re-scored with a
-  converged fit. That re-scoring is not done here.
+  converged fit. Slice K re-scores slice J converged: both verdicts hold.
 
 ## Slice I (2026-11-20): Dirichlet with a wider lambda grid, pre-registered; stays OFF
 
@@ -685,7 +728,7 @@ tests/
 
 ## Next slices (not done)
 
-- Multiclass calibration under shift (Dirichlet with a wider grid, a fixed lambda and a holdout choice are done in slices I-J; all OFF)
+- Multiclass calibration under shift (Dirichlet with a wider grid, a fixed lambda and a holdout choice are done in slices I-J, re-scored converged in K; all OFF)
 - Temperature scaling for neural nets (binary temperature is done in slice C; multiclass logits are not)
 - Real-data shift benchmarks (e.g. time-split public tabular sets) for the slice C / D methods
 - Mixed label + covariate shift; multiclass BBSE / EM with a regularised confusion matrix

@@ -39,4 +39,4 @@ def test_prose():
 
 
 def test_overview():
-    assert "10. **Slice J (this PR)**" in README
+    assert "10. **Slice J**:" in README
