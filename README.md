@@ -51,6 +51,13 @@ Reading (from the table; decides nothing):
 ### Weaknesses
 
 - Two datasets x three models, 10 seeds; one fixed lambda chosen on three dev seeds; one 30% holdout split.
+- **The ODIR fit is not fully converged.** This PR's CI run on Python 3.11 recomputed slice H's dev probe away from the
+  recorded values (digits logistic, lambda 100: 0.1444 vs 0.1423; digits naive Bayes 0.548 vs 0.521). The cause is
+  L-BFGS-B's default stop: run to ftol 1e-15 the same fits give 0.1447 and 0.548, so that runner simply stops nearer
+  the optimum. Every Dirichlet number in slices H-J comes from the default stop, which acts as mild early stopping.
+  Converged fits have a lower calibration-row loss and a *higher* digits test NLL (`tests/test_dirichlet_convergence.py`),
+  so converging would widen Dirichlet's NLL loss and no OFF decision would change. Re-scoring H-J converged is not
+  done here.
 
 ## Slice I (2026-11-20): Dirichlet with a wider lambda grid, pre-registered; stays OFF
 
