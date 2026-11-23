@@ -26,11 +26,12 @@ def test_probe_uses_dev_seeds_only_and_larger_lambda_helps_digits():
 
 
 def test_probe_recomputes_one_cell():
-    # digits logistic, not digits naive Bayes: GaussianNB's digits probabilities saturate (log p sits on the
-    # 1e-12 floor for most classes), and that cell's mean NLL came out 0.548 instead of 0.521 on the CI's
-    # Python 3.11 runner while reproducing exactly on a local 3.11 install with the same numpy / scipy /
-    # scikit-learn versions; the logistic cell is well conditioned.
+    # The ODIR fit stops at L-BFGS-B's default tolerance, before full convergence, and where it stops
+    # depends on the platform: the CI's Python 3.11 runner lands nearer the converged optimum
+    # (digits logistic 0.1444 vs the recorded 0.1423; a fit run to ftol 1e-15 gives 0.1447), digits naive
+    # Bayes by +0.028. So the recompute uses the well-conditioned logistic cell with a tolerance that
+    # covers the measured stopping gap (tests/test_dirichlet_convergence.py), not 1e-3.
     w = H.posthoc_wider_lambda(seeds=H.DEV_SEEDS, lams=(100.0,))
     got = w[(w.dataset == "digits") & (w.model == "logistic") & (w["map"] == "dirichlet lam=100")].nll.mean()
     t = pd.read_csv(RES / "slice_h_posthoc_lambda.csv").set_index(["dataset", "model", "map"])
-    assert abs(got - t.loc[("digits", "logistic", "dirichlet lam=100"), "nll"]) < 1e-3
+    assert abs(got - t.loc[("digits", "logistic", "dirichlet lam=100"), "nll"]) < 5e-3
