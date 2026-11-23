@@ -1,4 +1,4 @@
-"""The ODIR fit's default stop is short of the optimum on digits; converging only raises test NLL.
+"""The ODIR fit's default stop is short of the optimum on digits, and where it stops depends on the platform.
 
 Found when slice J's CI run on Python 3.11 recomputed slice H's dev probe 0.002-0.028 NLL away from
 the recorded values. Every Dirichlet number in slices H-J comes from the default stop.
@@ -18,7 +18,7 @@ def _tight(*a, **k):
     return minimize(*a, **k)
 
 
-def test_converged_digits_fit_has_lower_train_loss_and_higher_test_nll(monkeypatch):
+def test_converged_digits_fit_is_reproducible_and_the_default_stop_is_not(monkeypatch):
     x, y = load("digits", 100)
     x_tr, y_tr, x_cal, y_cal, x_te, y_te = split(x, y, 100)
     m = make_model("logistic", 100).fit(x_tr, y_tr)
@@ -29,6 +29,8 @@ def test_converged_digits_fit_has_lower_train_loss_and_higher_test_nll(monkeypat
     cal_default, cal_tight = multiclass_nll(y_cal, default.transform(pc)), multiclass_nll(y_cal, tight.transform(pc))
     te_default, te_tight = multiclass_nll(y_te, default.transform(pt)), multiclass_nll(y_te, tight.transform(pt))
     assert cal_tight <= cal_default + 1e-9  # closer to the optimum on the rows it is fitted to
-    assert te_tight > te_default  # and worse out of sample: the default stop acts as early stopping
-    assert te_tight - te_default < 0.01  # 0.149 -> 0.157 on this seed; +0.0024 on the mean over seeds 100-102
+    # The converged fit gives 0.15659 locally and 0.15659 on the CI 3.11 runner; the default stop gave 0.1492
+    # locally and 0.1594 on that runner, so the sign of (converged - default) on test NLL is not stable.
+    assert abs(te_tight - 0.15659) < 2e-4
+    assert abs(te_tight - te_default) < 0.012
     assert not np.allclose(default.W_, tight.W_, atol=1e-3)
