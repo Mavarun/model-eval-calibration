@@ -1,0 +1,128 @@
+{
+  "H6": {
+    "pass": false,
+    "cells_ece_wins_ge7": 1,
+    "cells": [
+      {
+        "dataset": "digits",
+        "model": "logistic",
+        "ece_wins": 3,
+        "ece_diff": 0.00014038817060448147,
+        "nll_diff": 0.02969602282358259,
+        "acc_diff": 0.0018518518518518712,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "random_forest",
+        "ece_wins": 3,
+        "ece_diff": 0.0005253396873343281,
+        "nll_diff": 0.030321629489179512,
+        "acc_diff": -0.0020370370370370373,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.013813486714817459,
+        "nll_diff": -0.07930803931164951,
+        "acc_diff": 0.04222222222222223,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "logistic",
+        "ece_wins": 6,
+        "ece_diff": -0.0002791480929814485,
+        "nll_diff": 0.0001559159130847032,
+        "acc_diff": -0.0013888888888888673,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "random_forest",
+        "ece_wins": 5,
+        "ece_diff": -7.37780996437204e-05,
+        "nll_diff": -4.707009304295573e-05,
+        "acc_diff": 0.000722222222222213,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "naive_bayes",
+        "ece_wins": 5,
+        "ece_diff": -0.00025657230514648696,
+        "nll_diff": -0.004215466006391599,
+        "acc_diff": -0.0004999999999999837,
+        "n_seeds": 10
+      }
+    ]
+  },
+  "H7": {
+    "pass": false,
+    "cells_ece_wins_ge7": 3,
+    "cells": [
+      {
+        "dataset": "digits",
+        "model": "logistic",
+        "ece_wins": 3,
+        "ece_diff": 0.00024111085669989004,
+        "nll_diff": 0.028400484412022663,
+        "acc_diff": 0.001666666666666683,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "random_forest",
+        "ece_wins": 3,
+        "ece_diff": 0.0005399574311430673,
+        "nll_diff": 0.030402249254247976,
+        "acc_diff": -0.002037037037037048,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "digits",
+        "model": "naive_bayes",
+        "ece_wins": 10,
+        "ece_diff": -0.013759381220848143,
+        "nll_diff": -0.042547404584608525,
+        "acc_diff": 0.04018518518518517,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "logistic",
+        "ece_wins": 8,
+        "ece_diff": -0.0011586135294173565,
+        "nll_diff": -0.0048320133066437785,
+        "acc_diff": 0.00277777777777779,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "random_forest",
+        "ece_wins": 6,
+        "ece_diff": -0.0009659975792285849,
+        "nll_diff": 0.003989376203272732,
+        "acc_diff": -0.0011666666666666713,
+        "n_seeds": 10
+      },
+      {
+        "dataset": "synth5",
+        "model": "naive_bayes",
+        "ece_wins": 8,
+        "ece_diff": -0.0033015250116298816,
+        "nll_diff": -0.018650089506755795,
+        "acc_diff": 0.009055555555555577,
+        "n_seeds": 10
+      }
+    ]
+  },
+  "recommended": "temperature",
+  "preregistered": {
+    "H6_fixed_lambda_over_temperature": "On fresh seeds 40-49, Dirichlet scaling with lambda fixed at 100 replaces temperature iff, in >= 4 of the 6 (dataset, model) cells, it lowers test classwise ECE vs temperature on >= 7 of 10 seeds, AND in every cell its mean test accuracy is no more than 0.005 below temperature's and its mean NLL no more than 0.01 above.",
+    "H7_holdout_lambda_over_temperature": "The same bar for Dirichlet with the wide grid and lambda chosen on one stratified 30% holdout of the calibration rows. If both pass, the one with more ECE-winning cells is recommended (ties: fixed, simpler).",
+    "reported_not_decided": "Debiased classwise CE, the holdout-chosen lambdas."
+  }
+}
